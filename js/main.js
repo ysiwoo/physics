@@ -527,7 +527,14 @@ function buildChart(p) {
       parsing: false,
       scales: {
         x: { type: "linear", title: { display: true, text: labelX, color: th.chartTick }, ticks: { color: th.chartTick }, grid: { color: th.chartGrid } },
-        y: { title: { display: true, text: labelY, color: th.chartTick }, ticks: { color: th.chartTick }, grid: { color: th.chartGrid } },
+        y: {
+          // 에너지 그래프는 y축을 0부터 고정한다. 이론(무손실)에서는 RK4의 극미한 수치오차(약 1e-8 수준)만
+          // 남는데, 축을 데이터 범위에 맞춰 자동 확대하면 이 오차가 마치 에너지가 새는 것처럼 보인다.
+          min: (gt === "keT" || gt === "peT" || gt === "meT") ? 0 : undefined,
+          title: { display: true, text: labelY, color: th.chartTick },
+          ticks: { color: th.chartTick },
+          grid: { color: th.chartGrid },
+        },
       },
       plugins: {
         legend: { labels: { color: th.chartLegend } },
