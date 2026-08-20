@@ -129,7 +129,7 @@ function getParams() {
     ci_v0: parseFloat(els.ci_v0.value),
     ci_periods: parseFloat(els.ci_periods.value),
     sh_k: parseFloat(els.sh_springK.value),
-    sh_x0: parseFloat(els.sh_x0.value),
+    sh_x0: parseFloat(els.sh_x0.value) / 100, // cm -> m
     sh_periods: parseFloat(els.sh_periods.value),
   };
 }
@@ -529,6 +529,16 @@ function drawFrame() {
     ctx.strokeStyle = th.ground;
     ctx.beginPath(); ctx.moveTo(anchorX, midY - 30); ctx.lineTo(anchorX, midY + 30); ctx.stroke();
 
+    // 평형점(x=0) 표시
+    ctx.save();
+    ctx.strokeStyle = th.ghostStroke;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(eqX, midY - 35); ctx.lineTo(eqX, midY + 35); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = th.label; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("평형점", eqX, midY - 42);
+    ctx.textAlign = "start";
+
     drawTrail(collectTrail((d) => ({ x: toX(d.x), y: midY })));
 
     const thd = theoryAt(state.t);
@@ -549,7 +559,7 @@ function drawFrame() {
       drawSpring(thX, th.ground);
       drawSteelBall(thX, midY, ballR, false);
     }
-    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   변위: ${curX.toFixed(3)} m   속도: ${curV.toFixed(2)} m/s`;
+    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   변위: ${(curX * 100).toFixed(2)} cm   속도: ${curV.toFixed(2)} m/s`;
   }
 
   updateChartMarker();
@@ -654,7 +664,7 @@ function buildChart(p) {
       if (motion === "projectile") return { x: d.x, y: d.y };
       if (motion === "pendulum") return { x: d.t, y: (d.theta * 180) / Math.PI };
       if (motion === "circular") return { x: d.t, y: (d.theta * 180) / Math.PI };
-      return { x: d.t, y: d.x }; // shm
+      return { x: d.t, y: d.x * 100 }; // shm, cm
     };
     if (state.motion === "freefall") {
       labelY = "높이 (m)";
@@ -665,7 +675,7 @@ function buildChart(p) {
     } else if (state.motion === "circular") {
       labelY = "회전각 (°, 누적)";
     } else if (state.motion === "shm") {
-      labelY = "변위 (m)";
+      labelY = "변위 (cm)";
     }
     theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
     realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
@@ -753,7 +763,7 @@ function updateChartMarker() {
       point = { x: state.t, y: (src.theta * 180) / Math.PI };
     } else if (state.motion === "shm") {
       const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-      point = { x: state.t, y: src.x };
+      point = { x: state.t, y: src.x * 100 };
     }
   } else {
     const info = GRAPH_TYPES[state.graphType];
@@ -805,8 +815,8 @@ function buildTable(p) {
       : ["시간(s)", "회전각(°)", "각속도(°/s)"];
   } else if (state.motion === "shm") {
     headers = p.airOn
-      ? ["시간(s)", "실제 변위(m)", "이론 변위(m)", "변위 오차율", "실제 속도(m/s)", "이론 속도(m/s)", "속도 오차율"]
-      : ["시간(s)", "변위(m)", "속도(m/s)"];
+      ? ["시간(s)", "실제 변위(cm)", "이론 변위(cm)", "변위 오차율", "실제 속도(m/s)", "이론 속도(m/s)", "속도 오차율"]
+      : ["시간(s)", "변위(cm)", "속도(m/s)"];
   }
   els.tableHead.innerHTML = headers.map((h) => `<th>${h}</th>`).join("");
 
@@ -851,11 +861,13 @@ function buildTable(p) {
       }
     } else if (state.motion === "shm") {
       const thd = theoryAt(tt);
+      const thXcm = thd.x * 100;
       if (p.airOn) {
         const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
+        const rXcm = r.x * 100;
+        cells = [fmt(tt, 2), fmt(rXcm), fmt(thXcm), errCell(rXcm, thXcm), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
       } else {
-        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.v)];
+        cells = [fmt(tt, 2), fmt(thXcm), fmt(thd.v)];
       }
     }
     rows.push(`<tr>${cells.map((c) => (typeof c === "string" && c.startsWith("<td")) ? c : `<td>${c}</td>`).join("")}</tr>`);
