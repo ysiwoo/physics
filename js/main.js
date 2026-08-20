@@ -42,7 +42,6 @@ const els = {
   exportCsvBtn: document.getElementById("exportCsvBtn"),
   showVelocity: document.getElementById("showVelocity"),
   showAccel: document.getElementById("showAccel"),
-  showTrajectory: document.getElementById("showTrajectory"),
 };
 
 const ctx = els.canvas.getContext("2d");
@@ -138,7 +137,7 @@ const PERIODIC_MOTIONS = ["pendulum", "circular", "shm"];
 
 let state = {
   motion: "freefall",
-  theme: "dark",
+  theme: "light",
   graphType: "st",
   playing: false,
   t: 0,
@@ -152,12 +151,11 @@ let state = {
   dragThetaDeg: null, // 캔버스에서 쇠구슬을 드래그하는 동안의 임시 각도
   showVelocity: false,
   showAccel: false,
-  showTrajectory: false,
   maxV: 1,
   maxA: 1,
 };
 
-[["showVelocity", "showVelocity"], ["showAccel", "showAccel"], ["showTrajectory", "showTrajectory"]].forEach(([elKey, stateKey]) => {
+[["showVelocity", "showVelocity"], ["showAccel", "showAccel"]].forEach(([elKey, stateKey]) => {
   const input = els[elKey];
   const chip = input.closest(".toggle-chip");
   input.addEventListener("change", () => {
@@ -212,8 +210,8 @@ els.themeBtns.forEach((btn) => {
   btn.addEventListener("click", () => applyTheme(btn.dataset.theme));
 });
 
-let savedTheme = "dark";
-try { savedTheme = localStorage.getItem("physicsSimTheme") || "dark"; } catch (e) {}
+let savedTheme = "light";
+try { savedTheme = localStorage.getItem("physicsSimTheme") || "light"; } catch (e) {}
 
 // ---------------- 모션 전환 ----------------
 function setMotion(motion) {
@@ -442,23 +440,6 @@ function drawTrail(points) {
   ctx.restore();
 }
 
-// "궤적 보기" 토글: 지금까지 지나온 경로를 촘촘한 선으로 잇는다 (잔상 점보다 촘촘한 샘플).
-function drawTrajectoryLine(mapFn) {
-  const data = activeData();
-  const fineDt = TRAIL_DT / 3;
-  ctx.save();
-  ctx.strokeStyle = theme().realPath;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  let first = true;
-  for (let tt = 0; tt <= state.t; tt += fineDt) {
-    const pt = mapFn(Physics.sampleAt(data, SIM_DT, tt));
-    if (first) { ctx.moveTo(pt.x, pt.y); first = false; } else ctx.lineTo(pt.x, pt.y);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
 function drawVectorArrow(x, y, dirX, dirY, length, color) {
   const mag = Math.hypot(dirX, dirY);
   if (mag < 1e-6 || length < 1) return;
@@ -567,7 +548,6 @@ function drawFrame() {
     const toY = (y) => top + (p.ff_h - Math.min(Math.max(y, 0), p.ff_h)) * scale;
     const mapFn = (d) => ({ x: cx, y: toY(d.y) });
     drawTrail(collectTrail(mapFn));
-    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thY = toY(thd.y);
@@ -663,7 +643,6 @@ function drawFrame() {
     const thd = theoryAt(state.t);
     const mapFn = (d) => ballPos(d.theta);
     drawTrail(collectTrail(mapFn));
-    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const drawArm = (theta, ghost) => {
       const b = ballPos(theta);
@@ -707,7 +686,6 @@ function drawFrame() {
     ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
 
     drawTrail(collectTrail(mapFn));
-    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thPos = posAt(thd.theta);
@@ -769,7 +747,6 @@ function drawFrame() {
 
     const mapFn = (d) => ({ x: toX(d.x), y: midY });
     drawTrail(collectTrail(mapFn));
-    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thX = toX(thd.x);
