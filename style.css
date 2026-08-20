@@ -52,6 +52,13 @@ body {
   margin: 0;
 }
 
+.app-header h1 .credit {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+
 .motion-nav {
   display: flex;
   gap: 8px;
@@ -334,13 +341,6 @@ thead th {
 tbody tr:hover { background: rgba(255,255,255,0.03); }
 
 td.err-cell.high { color: var(--danger); }
-
-.app-footer {
-  text-align: center;
-  padding: 10px 20px 24px;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
