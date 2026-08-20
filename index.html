@@ -13,9 +13,8 @@
   <nav class="motion-nav">
     <button class="motion-btn active" data-motion="freefall">자유낙하 운동</button>
     <button class="motion-btn" data-motion="projectile">포물선 운동</button>
-    <button class="motion-btn" data-motion="pendulum">단진자 운동</button>
-    <button class="motion-btn" data-motion="momentum">운동량·충격량 실험</button>
     <button class="motion-btn" data-motion="circular">등속 원운동</button>
+    <button class="motion-btn" data-motion="pendulum">단진자 운동</button>
     <button class="motion-btn" data-motion="shm">단진동 운동</button>
   </nav>
 </header>
@@ -105,32 +104,6 @@
       </label>
     </section>
 
-    <section class="control-group hidden" data-motion-panel="pendulum">
-      <h2>단진자 운동 조건</h2>
-      <label>줄 길이 L (m)
-        <input type="number" id="pd_length" value="1" min="0.1" max="5" step="0.05">
-      </label>
-      <label>초기 각도 θ₀ (°) — 캔버스에서 쇠구슬을 드래그해도 바뀝니다
-        <input type="number" id="pd_angle" value="30" min="-175" max="175" step="1">
-      </label>
-      <label>최소 진동 횟수 (반복 재생 기준)
-        <input type="number" id="pd_periods" value="4" min="1" max="15" step="1">
-      </label>
-    </section>
-
-    <section class="control-group hidden" data-motion-panel="momentum">
-      <h2>운동량·충격량 조건</h2>
-      <label>트랙 길이 D (m)
-        <input type="number" id="mm_track" value="2" min="0.5" max="10" step="0.1">
-      </label>
-      <label>초기 속력 v₀ (m/s)
-        <input type="number" id="mm_v0" value="5" min="0.5" max="30" step="0.1">
-      </label>
-      <label>반발 계수 e (벽 충돌)
-        <input type="number" id="mm_restitution" value="0.8" min="0" max="1" step="0.01">
-      </label>
-    </section>
-
     <section class="control-group hidden" data-motion-panel="circular">
       <h2>등속 원운동 조건</h2>
       <label>회전 반지름 R (m)
@@ -141,6 +114,19 @@
       </label>
       <label>최소 회전 횟수 (반복 재생 기준)
         <input type="number" id="ci_periods" value="4" min="1" max="15" step="1">
+      </label>
+    </section>
+
+    <section class="control-group hidden" data-motion-panel="pendulum">
+      <h2>단진자 운동 조건</h2>
+      <label>줄 길이 L (m)
+        <input type="number" id="pd_length" value="1" min="0.1" max="5" step="0.05">
+      </label>
+      <label>초기 각도 θ₀ (°) — 캔버스에서 쇠구슬을 드래그해도 바뀝니다
+        <input type="number" id="pd_angle" value="30" min="-175" max="175" step="1">
+      </label>
+      <label>최소 진동 횟수 (반복 재생 기준)
+        <input type="number" id="pd_periods" value="4" min="1" max="15" step="1">
       </label>
     </section>
 

@@ -21,9 +21,6 @@ const els = {
   pd_length: document.getElementById("pd_length"),
   pd_angle: document.getElementById("pd_angle"),
   pd_periods: document.getElementById("pd_periods"),
-  mm_track: document.getElementById("mm_track"),
-  mm_v0: document.getElementById("mm_v0"),
-  mm_restitution: document.getElementById("mm_restitution"),
   ci_radius: document.getElementById("ci_radius"),
   ci_v0: document.getElementById("ci_v0"),
   ci_periods: document.getElementById("ci_periods"),
@@ -128,9 +125,6 @@ function getParams() {
     pd_L: parseFloat(els.pd_length.value),
     pd_angle: parseFloat(els.pd_angle.value),
     pd_periods: parseFloat(els.pd_periods.value),
-    mm_D: parseFloat(els.mm_track.value),
-    mm_v0: parseFloat(els.mm_v0.value),
-    mm_e: parseFloat(els.mm_restitution.value),
     ci_R: parseFloat(els.ci_radius.value),
     ci_v0: parseFloat(els.ci_v0.value),
     ci_periods: parseFloat(els.ci_periods.value),
@@ -191,7 +185,6 @@ els.massFromRadius.addEventListener("click", () => {
 [els.mass, els.radius, els.gravity, els.airDensity, els.dragCoef,
  els.ff_height, els.ff_restitution, els.pj_v0, els.pj_angle, els.pj_h0, els.pj_restitution,
  els.pd_length, els.pd_angle, els.pd_periods,
- els.mm_track, els.mm_v0, els.mm_restitution,
  els.ci_radius, els.ci_v0, els.ci_periods,
  els.sh_springK, els.sh_x0, els.sh_periods].forEach((input) => {
   input.addEventListener("input", () => {
@@ -250,9 +243,6 @@ function computeAll() {
   } else if (state.motion === "pendulum") {
     state.theoryData = Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, 0, p.pd_periods, SIM_DT);
     state.realData = p.airOn ? Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, p.pd_periods, SIM_DT) : null;
-  } else if (state.motion === "momentum") {
-    state.theoryData = Physics.momentum.simulate(p.mm_D, p.mm_v0, p.massKg, 0, p.mm_e, SIM_DT);
-    state.realData = p.airOn ? Physics.momentum.simulate(p.mm_D, p.mm_v0, p.massKg, p.k, p.mm_e, SIM_DT) : null;
   } else if (state.motion === "circular") {
     state.theoryData = Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, 0, p.ci_periods, SIM_DT);
     state.realData = p.airOn ? Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, p.k, p.ci_periods, SIM_DT) : null;
@@ -478,33 +468,6 @@ function drawFrame() {
     }
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${curAngVel.toFixed(1)} °/s`;
 
-  } else if (state.motion === "momentum") {
-    const left = 40, right = W - 40, midY = H / 2;
-    const scale = (right - left) / p.mm_D;
-    const toX = (x) => left + Math.min(Math.max(x, 0), p.mm_D) * scale;
-
-    ctx.strokeStyle = th.ground;
-    ctx.beginPath(); ctx.moveTo(left, midY - 40); ctx.lineTo(left, midY + 40); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(right, midY - 40); ctx.lineTo(right, midY + 40); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(left, midY); ctx.lineTo(right, midY); ctx.stroke();
-
-    drawTrail(collectTrail((d) => ({ x: toX(d.x), y: midY })));
-
-    const thd = theoryAt(state.t);
-    const thX = toX(thd.x);
-    if (p.airOn) drawSteelBall(thX, midY, ballR, true);
-
-    let curV = thd.v;
-    if (p.airOn) {
-      const r = realAt(state.t);
-      drawSteelBall(toX(r.x), midY, ballR, false);
-      curV = r.v;
-    } else {
-      drawSteelBall(thX, midY, ballR, false);
-    }
-    const momentum = p.massKg * curV;
-    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속도: ${curV.toFixed(2)} m/s   운동량: ${momentum.toFixed(4)} kg·m/s`;
-
   } else if (state.motion === "circular") {
     const cx = W / 2, cy = H / 2;
     const margin = 40;
@@ -690,7 +653,6 @@ function buildChart(p) {
       if (motion === "freefall") return { x: d.t, y: d.y };
       if (motion === "projectile") return { x: d.x, y: d.y };
       if (motion === "pendulum") return { x: d.t, y: (d.theta * 180) / Math.PI };
-      if (motion === "momentum") return { x: d.t, y: d.x };
       if (motion === "circular") return { x: d.t, y: (d.theta * 180) / Math.PI };
       return { x: d.t, y: d.x }; // shm
     };
@@ -700,8 +662,6 @@ function buildChart(p) {
       labelX = "수평 거리 (m)"; labelY = "높이 (m)";
     } else if (state.motion === "pendulum") {
       labelY = "각도 (°)";
-    } else if (state.motion === "momentum") {
-      labelY = "위치 (m)";
     } else if (state.motion === "circular") {
       labelY = "회전각 (°, 누적)";
     } else if (state.motion === "shm") {
@@ -788,9 +748,6 @@ function updateChartMarker() {
     } else if (state.motion === "pendulum") {
       const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
       point = { x: state.t, y: (src.theta * 180) / Math.PI };
-    } else if (state.motion === "momentum") {
-      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-      point = { x: state.t, y: src.x };
     } else if (state.motion === "circular") {
       const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
       point = { x: state.t, y: (src.theta * 180) / Math.PI };
@@ -842,10 +799,6 @@ function buildTable(p) {
     headers = p.airOn
       ? ["시간(s)", "실제 각도(°)", "이론 각도(°)", "각도 오차율", "실제 각속도(°/s)", "이론 각속도(°/s)", "각속도 오차율"]
       : ["시간(s)", "각도(°)", "각속도(°/s)"];
-  } else if (state.motion === "momentum") {
-    headers = p.airOn
-      ? ["시간(s)", "실제 위치(m)", "이론 위치(m)", "위치 오차율", "실제 운동량(kg·m/s)", "이론 운동량(kg·m/s)", "운동량 오차율"]
-      : ["시간(s)", "위치(m)", "속도(m/s)", "운동량(kg·m/s)"];
   } else if (state.motion === "circular") {
     headers = p.airOn
       ? ["시간(s)", "실제 회전각(°)", "이론 회전각(°)", "회전각 오차율", "실제 각속도(°/s)", "이론 각속도(°/s)", "각속도 오차율"]
@@ -885,14 +838,6 @@ function buildTable(p) {
         cells = [fmt(tt, 2), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
       } else {
         cells = [fmt(tt, 2), fmt(thDeg), fmt(thAV)];
-      }
-    } else if (state.motion === "momentum") {
-      const thd = theoryAt(tt);
-      if (p.airOn) {
-        const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(p.massKg * r.v, 4), fmt(p.massKg * thd.v, 4), errCell(p.massKg * r.v, p.massKg * thd.v)];
-      } else {
-        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.v), fmt(p.massKg * thd.v, 4)];
       }
     } else if (state.motion === "circular") {
       const thd = theoryAt(tt);

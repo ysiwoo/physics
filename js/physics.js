@@ -1,6 +1,6 @@
-// 물리 계산 모듈: 자유낙하 / 포물선 운동 / 단진자 운동
+// 물리 계산 모듈: 자유낙하 / 포물선 운동 / 등속 원운동 / 단진자 운동 / 단진동 운동
 // 이론(k=0) / 실제(k>0, 공기저항) 모두 같은 RK4 적분기를 사용하고,
-// 자유낙하·포물선은 바닥에서 반발계수만큼 튕기며, 단진자는 감쇠 진동한다.
+// 자유낙하·포물선은 바닥에서 반발계수만큼 튕기며, 단진자·등속원운동·단진동은 감쇠 진동/회전한다.
 // 각 simulate()는 일정 시간(정지/한계) 이후 멈추는 "한 사이클" 데이터를 만들고,
 // 재생 쪽(main.js)에서 이 사이클을 반복 재생해 운동이 끝없이 이어지는 것처럼 보이게 한다.
 
@@ -147,39 +147,6 @@ const Physics = {
     },
   },
 
-  // ---------------- 운동량·충격량 실험 (벽 사이를 오가며 반발) ----------------
-  momentum: {
-    // state: [x(왼쪽 벽 기준 위치), v(+ 오른쪽)]
-    simulate(D, v0, m, k, restitution, dt) {
-      let state = [D / 2, v0];
-      let t = 0;
-      const data = [{ t, x: D / 2, v: v0 }];
-      const deriv = ([, v]) => [v, k > 0 ? -(k / m) * v * Math.abs(v) : 0];
-      const tMax = 40;
-      const restStreakLimit = Math.round(0.6 / dt);
-      let restStreak = 0;
-      while (t < tMax) {
-        state = rk4Step(state, dt, deriv);
-        t += dt;
-        if (state[0] <= 0 && state[1] < 0) {
-          state[0] = 0;
-          state[1] = -state[1] * restitution;
-        } else if (state[0] >= D && state[1] > 0) {
-          state[0] = D;
-          state[1] = -state[1] * restitution;
-        }
-        data.push({ t, x: state[0], v: state[1] });
-        if (Math.abs(state[1]) < 0.03) {
-          restStreak++;
-          if (restStreak > restStreakLimit) break;
-        } else {
-          restStreak = 0;
-        }
-      }
-      return data;
-    },
-  },
-
   // ---------------- 등속 원운동 (감쇠 시 각속도 감소) ----------------
   circular: {
     period(R, v0) {
@@ -283,10 +250,6 @@ const Physics = {
         a = Math.hypot(tangential, centripetal);
         h = L * (1 - Math.cos(d.theta)); // 최하점 기준 높이
         PE = m * g * h;
-      } else if (motion === "momentum") {
-        v = d.v;
-        a = (next.v - prev.v) / dt;
-        PE = 0; // 수평 트랙, 높이 변화 없음
       } else if (motion === "circular") {
         const R = extra.R;
         v = R * d.omega;
