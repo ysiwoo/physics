@@ -152,6 +152,17 @@
   <section class="main-view">
     <div class="canvas-wrap">
       <canvas id="simCanvas" width="560" height="380"></canvas>
+      <div class="vector-toggles">
+        <label class="toggle-chip" data-tip="쇠구슬에서 속도 방향으로 화살표를 그립니다. 길이는 그 순간 속력에 비례합니다">
+          <input type="checkbox" id="showVelocity"> 속도 벡터
+        </label>
+        <label class="toggle-chip" data-tip="쇠구슬에서 가속도 방향으로 화살표를 그립니다. 길이는 가속도 크기에 비례합니다">
+          <input type="checkbox" id="showAccel"> 가속도 벡터
+        </label>
+        <label class="toggle-chip" data-tip="지금까지 지나온 경로를 선으로 이어서 보여줍니다">
+          <input type="checkbox" id="showTrajectory"> 궤적 보기
+        </label>
+      </div>
     </div>
     <div class="chart-wrap">
       <div class="chart-header group-header">

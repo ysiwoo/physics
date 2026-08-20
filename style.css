@@ -245,6 +245,35 @@ body {
   padding: 10px;
 }
 
+.vector-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.toggle-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--btn-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-chip input { accent-color: var(--accent); cursor: pointer; }
+
+.toggle-chip.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(79, 140, 255, 0.12);
+}
+
 #simCanvas {
   width: 100%;
   height: auto;

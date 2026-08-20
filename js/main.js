@@ -40,6 +40,9 @@ const els = {
   presetButtons: document.getElementById("presetButtons"),
   exportChartBtn: document.getElementById("exportChartBtn"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
+  showVelocity: document.getElementById("showVelocity"),
+  showAccel: document.getElementById("showAccel"),
+  showTrajectory: document.getElementById("showTrajectory"),
 };
 
 const ctx = els.canvas.getContext("2d");
@@ -147,7 +150,22 @@ let state = {
   chart: null,
   lastTs: null,
   dragThetaDeg: null, // 캔버스에서 쇠구슬을 드래그하는 동안의 임시 각도
+  showVelocity: false,
+  showAccel: false,
+  showTrajectory: false,
+  maxV: 1,
+  maxA: 1,
 };
+
+[["showVelocity", "showVelocity"], ["showAccel", "showAccel"], ["showTrajectory", "showTrajectory"]].forEach(([elKey, stateKey]) => {
+  const input = els[elKey];
+  const chip = input.closest(".toggle-chip");
+  input.addEventListener("change", () => {
+    state[stateKey] = input.checked;
+    chip.classList.toggle("active", input.checked);
+    drawFrame();
+  });
+});
 
 function theme() {
   return THEMES[state.theme];
@@ -339,9 +357,40 @@ function computeAll() {
   state.realDuration = state.realData ? state.realData[state.realData.length - 1].t : 0;
   state.tEnd = Math.max(state.theoryDuration, state.realDuration, 0.01);
 
+  const extra = { L: p.pd_L, R: p.ci_R, springK: p.sh_k };
+  state.theoryDerived = Physics.derive(state.theoryData, state.motion, p.massKg, p.g, extra);
+  state.realDerived = state.realData ? Physics.derive(state.realData, state.motion, p.massKg, p.g, extra) : null;
+  state.maxV = Math.max(maxAbsField(state.theoryDerived, "v"), state.realDerived ? maxAbsField(state.realDerived, "v") : 0, 1e-6);
+  // 가속도는 반발/벽 충돌 순간 속도가 한 스텝 만에 뒤집히면서 유한차분 값이 순간적으로
+  // 치솟는다. 이 한두 프레임짜리 충돌 스파이크를 기준으로 화살표 길이를 잡으면 평소
+  // 가속도 화살표가 거의 안 보일 만큼 짧아지므로, 최댓값 대신 95백분위수를 기준으로 쓴다.
+  state.maxA = Math.max(percentileAbsField(state.theoryDerived, "a"), state.realDerived ? percentileAbsField(state.realDerived, "a") : 0, 1e-6);
+
   buildChart(p);
   buildTable(p);
   drawFrame();
+}
+
+function maxAbsField(data, field) {
+  let m = 0;
+  for (const d of data) { const v = Math.abs(d[field]); if (v > m) m = v; }
+  return m;
+}
+
+function percentileAbsField(data, field, pct = 0.95) {
+  if (!data.length) return 0;
+  const vals = data.map((d) => Math.abs(d[field])).sort((a, b) => a - b);
+  return vals[Math.min(vals.length - 1, Math.floor(vals.length * pct))];
+}
+
+// 등속원운동·단진자·단진동처럼 감쇠가 아주 약할 때, 그래프에 수십 개의 진동이
+// 한꺼번에 몰려 파란 선이 사실상 색칠된 것처럼 겹쳐 보이는 걸 막기 위한 표시 구간 상한.
+const MAX_DISPLAY_PERIODS = 12;
+function motionPeriod(motion, p) {
+  if (motion === "pendulum") return Physics.pendulum.period(p.pd_L, p.g);
+  if (motion === "circular") return Physics.circular.period(p.ci_R, p.ci_v0);
+  if (motion === "shm") return Physics.shm.period(p.sh_k, p.massKg);
+  return null;
 }
 
 // 단진자 이론(k=0)은 손실이 없어 정확히 주기적으로 반복되므로,
@@ -393,6 +442,83 @@ function drawTrail(points) {
   ctx.restore();
 }
 
+// "궤적 보기" 토글: 지금까지 지나온 경로를 촘촘한 선으로 잇는다 (잔상 점보다 촘촘한 샘플).
+function drawTrajectoryLine(mapFn) {
+  const data = activeData();
+  const fineDt = TRAIL_DT / 3;
+  ctx.save();
+  ctx.strokeStyle = theme().realPath;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  let first = true;
+  for (let tt = 0; tt <= state.t; tt += fineDt) {
+    const pt = mapFn(Physics.sampleAt(data, SIM_DT, tt));
+    if (first) { ctx.moveTo(pt.x, pt.y); first = false; } else ctx.lineTo(pt.x, pt.y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawVectorArrow(x, y, dirX, dirY, length, color) {
+  const mag = Math.hypot(dirX, dirY);
+  if (mag < 1e-6 || length < 1) return;
+  const ux = dirX / mag, uy = dirY / mag;
+  const endX = x + ux * length, endY = y + uy * length;
+  const angle = Math.atan2(uy, ux);
+  const headLen = 7;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// 속도/가속도 벡터: 방향은 화면 좌표에서 근처 시점들의 위치 차분으로(모션마다 다른 화면
+// 변환을 다시 손으로 안 풀어도 되게), 길이는 이 운동에서 나올 수 있는 최댓값 대비 비율로 정한다.
+function drawMotionVectors(mapFn, ballX, ballY) {
+  if (!state.showVelocity && !state.showAccel) return;
+  const p = getParams();
+  const useReal = p.airOn;
+  const data = useReal ? state.realData : state.theoryData;
+  if (!data) return;
+  const derived = derivedAt(state.t, useReal);
+  if (!derived) return;
+
+  const wrap = (tt) => {
+    if (useReal || !PERIODIC_MOTIONS.includes(state.motion) || state.theoryDuration <= 0) return Math.max(tt, 0);
+    return ((tt % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
+  };
+  const tNext = wrap(state.t + SIM_DT);
+  const tPrev = wrap(state.t - SIM_DT);
+  const tCur = wrap(state.t);
+  const nextPt = mapFn(Physics.sampleAt(data, SIM_DT, tNext));
+  const prevPt = mapFn(Physics.sampleAt(data, SIM_DT, tPrev));
+
+  if (state.showVelocity) {
+    const dx = nextPt.x - prevPt.x, dy = nextPt.y - prevPt.y;
+    const len = 14 + Math.min(1, Math.abs(derived.v) / state.maxV) * 50;
+    drawVectorArrow(ballX, ballY, dx, dy, len, "#ffd166");
+  }
+  if (state.showAccel) {
+    const curPt = mapFn(Physics.sampleAt(data, SIM_DT, tCur));
+    const adx = nextPt.x - 2 * curPt.x + prevPt.x;
+    const ady = nextPt.y - 2 * curPt.y + prevPt.y;
+    // maxA는 충돌 스파이크를 배제한 95백분위수라 실제 순간값이 이를 넘을 수 있어 1로 클램프한다.
+    const len = 14 + Math.min(1, Math.abs(derived.a) / state.maxA) * 50;
+    drawVectorArrow(ballX, ballY, adx, ady, len, "#ff6b6b");
+  }
+}
+
 // ---------------- 캔버스 애니메이션 ----------------
 const STEEL_LIGHT = "#dfe6f0";
 const STEEL_DARK = "#5a6478";
@@ -439,7 +565,9 @@ function drawFrame() {
     ctx.fillText(`h = ${p.ff_h} m`, 20, top - 10);
 
     const toY = (y) => top + (p.ff_h - Math.min(Math.max(y, 0), p.ff_h)) * scale;
-    drawTrail(collectTrail((d) => ({ x: cx, y: toY(d.y) })));
+    const mapFn = (d) => ({ x: cx, y: toY(d.y) });
+    drawTrail(collectTrail(mapFn));
+    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thY = toY(thd.y);
@@ -454,6 +582,7 @@ function drawFrame() {
     } else {
       drawSteelBall(cx, thY, ballR, false);
     }
+    drawMotionVectors(mapFn, cx, curY);
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속도: ${curV.toFixed(2)} m/s`;
 
   } else if (state.motion === "projectile") {
@@ -481,11 +610,13 @@ function drawFrame() {
     ctx.stroke();
     ctx.restore();
 
-    drawTrail(collectTrail((d) => { const [x, y] = toPx(d.x, d.y); return { x, y }; }));
+    const mapFn = (d) => { const [x, y] = toPx(d.x, d.y); return { x, y }; };
+    drawTrail(collectTrail(mapFn));
 
     const thd = theoryAt(state.t);
     const [thx, thy] = toPx(thd.x, thd.y);
     let curSpeed = thd.speed;
+    let ballX = thx, ballY = thy;
 
     if (p.airOn) {
       drawSteelBall(thx, thy, ballR, true);
@@ -502,9 +633,11 @@ function drawFrame() {
       const [rx, ry] = toPx(r.x, r.y);
       drawSteelBall(rx, ry, ballR, false);
       curSpeed = r.speed;
+      ballX = rx; ballY = ry;
     } else {
       drawSteelBall(thx, thy, ballR, false);
     }
+    drawMotionVectors(mapFn, ballX, ballY);
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속력: ${curSpeed.toFixed(2)} m/s`;
 
   } else if (state.motion === "pendulum") {
@@ -528,7 +661,9 @@ function drawFrame() {
     }
 
     const thd = theoryAt(state.t);
-    drawTrail(collectTrail((d) => ballPos(d.theta)));
+    const mapFn = (d) => ballPos(d.theta);
+    drawTrail(collectTrail(mapFn));
+    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const drawArm = (theta, ghost) => {
       const b = ballPos(theta);
@@ -541,15 +676,19 @@ function drawFrame() {
 
     let curAngDeg = (thd.theta * 180) / Math.PI;
     let curAngVel = (thd.angVel * 180) / Math.PI;
+    let finalTheta = thd.theta;
     if (p.airOn) {
       drawArm(thd.theta, true);
       const r = realAt(state.t);
       drawArm(r.theta, false);
       curAngDeg = (r.theta * 180) / Math.PI;
       curAngVel = (r.angVel * 180) / Math.PI;
+      finalTheta = r.theta;
     } else {
       drawArm(thd.theta, false);
     }
+    const finalBallPos = ballPos(finalTheta);
+    drawMotionVectors(mapFn, finalBallPos.x, finalBallPos.y);
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${curAngVel.toFixed(1)} °/s`;
 
   } else if (state.motion === "circular") {
@@ -557,6 +696,7 @@ function drawFrame() {
     const margin = 40;
     const scale = (Math.min(W, H) / 2 - margin) / p.ci_R;
     const posAt = (theta) => ({ x: cx + Math.cos(theta) * p.ci_R * scale, y: cy + Math.sin(theta) * p.ci_R * scale });
+    const mapFn = (d) => posAt(d.theta);
 
     ctx.save();
     ctx.strokeStyle = th.ghostStroke;
@@ -566,21 +706,25 @@ function drawFrame() {
     ctx.fillStyle = th.ground;
     ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
 
-    drawTrail(collectTrail((d) => posAt(d.theta)));
+    drawTrail(collectTrail(mapFn));
+    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thPos = posAt(thd.theta);
     if (p.airOn) drawSteelBall(thPos.x, thPos.y, ballR, true);
 
     let curOmegaDeg = (thd.omega * 180) / Math.PI;
+    let ballX = thPos.x, ballY = thPos.y;
     if (p.airOn) {
       const r = realAt(state.t);
       const rPos = posAt(r.theta);
       drawSteelBall(rPos.x, rPos.y, ballR, false);
       curOmegaDeg = (r.omega * 180) / Math.PI;
+      ballX = rPos.x; ballY = rPos.y;
     } else {
       drawSteelBall(thPos.x, thPos.y, ballR, false);
     }
+    drawMotionVectors(mapFn, ballX, ballY);
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각속도: ${curOmegaDeg.toFixed(1)} °/s`;
 
   } else if (state.motion === "shm") {
@@ -623,7 +767,9 @@ function drawFrame() {
     ctx.fillText("평형점", eqX, midY - 42);
     ctx.textAlign = "start";
 
-    drawTrail(collectTrail((d) => ({ x: toX(d.x), y: midY })));
+    const mapFn = (d) => ({ x: toX(d.x), y: midY });
+    drawTrail(collectTrail(mapFn));
+    if (state.showTrajectory) drawTrajectoryLine(mapFn);
 
     const thd = theoryAt(state.t);
     const thX = toX(thd.x);
@@ -632,17 +778,18 @@ function drawFrame() {
       drawSteelBall(thX, midY, ballR, true);
     }
 
-    let curV = thd.v, curX = thd.x;
+    let curV = thd.v, curX = thd.x, ballX = thX;
     if (p.airOn) {
       const r = realAt(state.t);
       const x = toX(r.x);
       drawSpring(x, th.ground);
       drawSteelBall(x, midY, ballR, false);
-      curV = r.v; curX = r.x;
+      curV = r.v; curX = r.x; ballX = x;
     } else {
       drawSpring(thX, th.ground);
       drawSteelBall(thX, midY, ballR, false);
     }
+    drawMotionVectors(mapFn, ballX, midY);
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   변위: ${(curX * 100).toFixed(2)} cm   속도: ${curV.toFixed(2)} m/s`;
   }
 
@@ -738,11 +885,16 @@ function buildChart(p) {
   const th = theme();
   const gt = state.graphType;
 
+  // 감쇠가 아주 약한 등속원운동/단진자/단진동은 진동이 수십 번 반복돼도 거의 안 줄어들어서,
+  // 전체를 다 그리면 그래프에 선이 촘촘히 겹쳐 색칠된 것처럼 보인다. 그래프에는 앞쪽 몇 주기만
+  // 보여주고(애니메이션과 표는 전체 길이를 그대로 씀), 이걸로 파란 선이 뭉개져 보이는 문제를 막는다.
+  const period = motionPeriod(state.motion, p);
+  const maxChartT = period ? Math.min(state.tEnd, period * MAX_DISPLAY_PERIODS) : state.tEnd;
+  const capData = (data) => (data.length && data[data.length - 1].t > maxChartT ? data.filter((d) => d.t <= maxChartT) : data);
+
   let theoryPts, realPts;
 
   if (gt === "st") {
-    state.theoryDerived = null;
-    state.realDerived = null;
     const toPoint = (motion, d) => {
       if (motion === "freefall") return { x: d.t, y: d.y };
       if (motion === "projectile") return { x: d.x, y: d.y };
@@ -761,16 +913,13 @@ function buildChart(p) {
     } else if (state.motion === "shm") {
       labelY = "변위 (cm)";
     }
-    theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
-    realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
+    theoryPts = capData(state.theoryData).map((d) => toPoint(state.motion, d));
+    realPts = state.realData ? capData(state.realData).map((d) => toPoint(state.motion, d)) : [];
   } else {
     const info = GRAPH_TYPES[gt];
     labelY = `${info.label} (${info.unit})`;
-    const extra = { L: p.pd_L, R: p.ci_R, springK: p.sh_k };
-    state.theoryDerived = Physics.derive(state.theoryData, state.motion, p.massKg, p.g, extra);
-    state.realDerived = state.realData ? Physics.derive(state.realData, state.motion, p.massKg, p.g, extra) : null;
-    theoryPts = state.theoryDerived.map((d) => ({ x: d.t, y: d[info.field] }));
-    realPts = state.realDerived ? state.realDerived.map((d) => ({ x: d.t, y: d[info.field] })) : [];
+    theoryPts = capData(state.theoryDerived).map((d) => ({ x: d.t, y: d[info.field] }));
+    realPts = state.realDerived ? capData(state.realDerived).map((d) => ({ x: d.t, y: d[info.field] })) : [];
   }
 
   if (state.chart) state.chart.destroy();
