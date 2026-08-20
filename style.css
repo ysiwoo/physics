@@ -7,7 +7,24 @@
   --accent: #4f8cff;
   --accent-2: #ffb347;
   --danger: #ff6b6b;
+  --canvas-bg: #0c1220;
+  --input-bg: #0f1729;
+  --btn-bg: #24304d;
   --radius: 10px;
+}
+
+:root[data-theme="light"] {
+  --bg: #eef1f7;
+  --panel: #ffffff;
+  --panel-border: #d7deeb;
+  --text: #1b2436;
+  --text-dim: #57617a;
+  --accent: #2f6fed;
+  --accent-2: #b45309;
+  --danger: #dc2626;
+  --canvas-bg: #f5f7fb;
+  --input-bg: #eef1f7;
+  --btn-bg: #e2e8f2;
 }
 
 * { box-sizing: border-box; }
@@ -17,6 +34,7 @@ body {
   font-family: "Segoe UI", "Malgun Gothic", sans-serif;
   background: var(--bg);
   color: var(--text);
+  transition: background 0.15s, color 0.15s;
 }
 
 .app-header {
@@ -106,7 +124,7 @@ body {
 
 .control-group input[type="number"],
 .control-group select {
-  background: #0f1729;
+  background: var(--input-bg);
   border: 1px solid var(--panel-border);
   color: var(--text);
   padding: 6px 8px;
@@ -116,7 +134,7 @@ body {
 
 .control-group button {
   width: 100%;
-  background: #24304d;
+  background: var(--btn-bg);
   border: 1px solid var(--panel-border);
   color: var(--text);
   padding: 7px 8px;
@@ -127,6 +145,29 @@ body {
 }
 
 .control-group button:hover { border-color: var(--accent); }
+
+.theme-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-btn {
+  flex: 1;
+  background: var(--btn-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.theme-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
 
 .checkbox-row {
   flex-direction: row !important;
@@ -157,7 +198,8 @@ body {
 }
 
 .playback-row button#resetBtn {
-  background: #2a3654;
+  background: var(--btn-bg);
+  color: var(--text);
 }
 
 .readout {
@@ -184,7 +226,7 @@ body {
 #simCanvas {
   width: 100%;
   height: 380px;
-  background: #0c1220;
+  background: var(--canvas-bg);
   border-radius: 6px;
   display: block;
 }

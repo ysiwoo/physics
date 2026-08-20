@@ -2,6 +2,7 @@
 
 const els = {
   motionBtns: document.querySelectorAll(".motion-btn"),
+  themeBtns: document.querySelectorAll(".theme-btn"),
   panels: document.querySelectorAll("[data-motion-panel]"),
   mass: document.getElementById("mass"),
   radius: document.getElementById("radius"),
@@ -12,9 +13,11 @@ const els = {
   airDensity: document.getElementById("airDensity"),
   dragCoef: document.getElementById("dragCoef"),
   ff_height: document.getElementById("ff_height"),
+  ff_restitution: document.getElementById("ff_restitution"),
   pj_v0: document.getElementById("pj_v0"),
   pj_angle: document.getElementById("pj_angle"),
   pj_h0: document.getElementById("pj_h0"),
+  pj_restitution: document.getElementById("pj_restitution"),
   pd_length: document.getElementById("pd_length"),
   pd_angle: document.getElementById("pd_angle"),
   pd_periods: document.getElementById("pd_periods"),
@@ -29,19 +32,56 @@ const els = {
 };
 
 const ctx = els.canvas.getContext("2d");
-const SIM_DT = 0.02; // 실제(공기저항) 시뮬레이션 적분 간격
+const SIM_DT = 0.02; // 시뮬레이션 적분 간격 (이론/실제 공통)
 const TABLE_DT = 0.1; // 표 샘플링 간격
+const TRAIL_DT = 0.09; // 잔상(스트로보스코프) 점 간격 - 가속을 눈으로 보여줌
+
+const THEMES = {
+  dark: {
+    ground: "#3a4664",
+    label: "#9aa7c2",
+    ghostStroke: "rgba(148,163,184,0.7)",
+    realPath: "rgba(79,140,255,0.75)",
+    trail: "rgba(148,163,184,0.45)",
+    chartGrid: "#2a3654",
+    chartTick: "#9aa7c2",
+    chartLegend: "#e6ebf5",
+    chartTheory: "#9aa7c2",
+    chartReal: "#4f8cff",
+    chartMarker: "#ffb347",
+  },
+  light: {
+    ground: "#b7c0d4",
+    label: "#57617a",
+    ghostStroke: "rgba(87,97,122,0.6)",
+    realPath: "rgba(47,111,237,0.8)",
+    trail: "rgba(87,97,122,0.4)",
+    chartGrid: "#dde3ee",
+    chartTick: "#57617a",
+    chartLegend: "#1b2436",
+    chartTheory: "#8b93a8",
+    chartReal: "#2f6fed",
+    chartMarker: "#b45309",
+  },
+};
 
 let state = {
   motion: "freefall",
+  theme: "dark",
   playing: false,
   t: 0,
   tEnd: 1,
+  theoryData: null,
+  theoryDuration: 0,
   realData: null,
-  realDt: SIM_DT,
+  realDuration: 0,
   chart: null,
   lastTs: null,
 };
+
+function theme() {
+  return THEMES[state.theme];
+}
 
 function getParams() {
   const massKg = parseFloat(els.mass.value) / 1000;
@@ -54,14 +94,32 @@ function getParams() {
   return {
     massKg, radiusM, g, airOn, rho, Cd, k,
     ff_h: parseFloat(els.ff_height.value),
+    ff_e: parseFloat(els.ff_restitution.value),
     pj_v0: parseFloat(els.pj_v0.value),
     pj_angle: parseFloat(els.pj_angle.value),
     pj_h0: parseFloat(els.pj_h0.value),
+    pj_e: parseFloat(els.pj_restitution.value),
     pd_L: parseFloat(els.pd_length.value),
     pd_angle: parseFloat(els.pd_angle.value),
     pd_periods: parseFloat(els.pd_periods.value),
   };
 }
+
+// ---------------- 테마 ----------------
+function applyTheme(name) {
+  state.theme = name;
+  document.documentElement.setAttribute("data-theme", name);
+  els.themeBtns.forEach((b) => b.classList.toggle("active", b.dataset.theme === name));
+  try { localStorage.setItem("physicsSimTheme", name); } catch (e) {}
+  computeAll();
+}
+
+els.themeBtns.forEach((btn) => {
+  btn.addEventListener("click", () => applyTheme(btn.dataset.theme));
+});
+
+let savedTheme = "dark";
+try { savedTheme = localStorage.getItem("physicsSimTheme") || "dark"; } catch (e) {}
 
 // ---------------- 모션 전환 ----------------
 els.motionBtns.forEach((btn) => {
@@ -92,7 +150,7 @@ els.massFromRadius.addEventListener("click", () => {
 });
 
 [els.mass, els.radius, els.gravity, els.airDensity, els.dragCoef,
- els.ff_height, els.pj_v0, els.pj_angle, els.pj_h0,
+ els.ff_height, els.ff_restitution, els.pj_v0, els.pj_angle, els.pj_h0, els.pj_restitution,
  els.pd_length, els.pd_angle, els.pd_periods].forEach((input) => {
   input.addEventListener("input", () => {
     resetPlayback();
@@ -124,31 +182,62 @@ function computeAll() {
   const p = getParams();
 
   if (state.motion === "freefall") {
-    const tLandTheory = Physics.freeFall.tLand(p.ff_h, p.g);
-    state.realData = p.airOn ? Physics.freeFall.simulateReal(p.ff_h, p.g, p.massKg, p.k, SIM_DT) : null;
-    const tLandReal = state.realData ? state.realData[state.realData.length - 1].t : tLandTheory;
-    state.tEnd = Math.max(tLandTheory, tLandReal);
+    state.theoryData = Physics.freeFall.simulate(p.ff_h, p.g, p.massKg, 0, p.ff_e, SIM_DT);
+    state.realData = p.airOn ? Physics.freeFall.simulate(p.ff_h, p.g, p.massKg, p.k, p.ff_e, SIM_DT) : null;
   } else if (state.motion === "projectile") {
-    const angleRad = (p.pj_angle * Math.PI) / 180;
-    const tLandTheory = Physics.projectile.tLand(p.pj_v0, angleRad, p.pj_h0, p.g);
-    state.realData = p.airOn ? Physics.projectile.simulateReal(p.pj_v0, p.pj_angle, p.pj_h0, p.g, p.massKg, p.k, SIM_DT) : null;
-    const tLandReal = state.realData ? state.realData[state.realData.length - 1].t : tLandTheory;
-    state.tEnd = Math.max(tLandTheory, tLandReal);
+    state.theoryData = Physics.projectile.simulate(p.pj_v0, p.pj_angle, p.pj_h0, p.g, p.massKg, 0, p.pj_e, SIM_DT);
+    state.realData = p.airOn ? Physics.projectile.simulate(p.pj_v0, p.pj_angle, p.pj_h0, p.g, p.massKg, p.k, p.pj_e, SIM_DT) : null;
   } else if (state.motion === "pendulum") {
-    const T = Physics.pendulum.period(p.pd_L, p.g);
-    state.tEnd = T * p.pd_periods;
-    state.realData = p.airOn ? Physics.pendulum.simulateReal(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, SIM_DT, state.tEnd) : null;
+    state.theoryData = Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, 0, p.pd_periods, SIM_DT);
+    state.realData = p.airOn ? Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, p.pd_periods, SIM_DT) : null;
   }
+
+  state.theoryDuration = state.theoryData[state.theoryData.length - 1].t;
+  state.realDuration = state.realData ? state.realData[state.realData.length - 1].t : 0;
+  state.tEnd = Math.max(state.theoryDuration, state.realDuration, 0.01);
 
   buildChart(p);
   buildTable(p);
   drawFrame();
 }
 
+// 단진자 이론(k=0)은 손실이 없어 정확히 주기적으로 반복되므로,
+// tEnd가 이론 길이보다 길어져도(감쇠가 느린 실제값에 맞춰) 위상을 이어서 보여준다.
+function theoryAt(t) {
+  if (state.motion === "pendulum" && state.theoryDuration > 0) {
+    const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
+    return Physics.sampleAt(state.theoryData, SIM_DT, wrapped);
+  }
+  return Physics.sampleAt(state.theoryData, SIM_DT, t);
+}
+
 function realAt(t) {
   if (!state.realData) return null;
-  const idx = Math.min(state.realData.length - 1, Math.max(0, Math.round(t / SIM_DT)));
-  return state.realData[idx];
+  return Physics.sampleAt(state.realData, SIM_DT, t);
+}
+
+function activeData() {
+  return state.realData || state.theoryData;
+}
+
+function collectTrail(mapFn) {
+  const data = activeData();
+  const pts = [];
+  for (let tt = 0; tt <= state.t; tt += TRAIL_DT) {
+    pts.push(mapFn(Physics.sampleAt(data, SIM_DT, tt)));
+  }
+  return pts;
+}
+
+function drawTrail(points) {
+  ctx.save();
+  ctx.fillStyle = theme().trail;
+  points.forEach((pt) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 // ---------------- 캔버스 애니메이션 ----------------
@@ -158,7 +247,7 @@ const STEEL_DARK = "#5a6478";
 function drawSteelBall(cx, cy, r, ghost) {
   if (ghost) {
     ctx.save();
-    ctx.strokeStyle = "rgba(148,163,184,0.7)";
+    ctx.strokeStyle = theme().ghostStroke;
     ctx.setLineDash([3, 3]);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -182,6 +271,7 @@ function clearCanvas() {
 
 function drawFrame() {
   const p = getParams();
+  const th = theme();
   clearCanvas();
   const W = els.canvas.width, H = els.canvas.height;
   const ballR = 14;
@@ -190,19 +280,22 @@ function drawFrame() {
     const top = 30, bottom = H - 30;
     const scale = (bottom - top) / p.ff_h;
     const cx = W / 2;
-    ctx.strokeStyle = "#3a4664";
+    ctx.strokeStyle = th.ground;
     ctx.beginPath(); ctx.moveTo(20, bottom); ctx.lineTo(W - 20, bottom); ctx.stroke();
-    ctx.fillStyle = "#9aa7c2"; ctx.font = "12px sans-serif";
+    ctx.fillStyle = th.label; ctx.font = "12px sans-serif";
     ctx.fillText(`h = ${p.ff_h} m`, 20, top - 10);
 
-    const th = Physics.freeFall.theoryAt(state.t, p.ff_h, p.g);
-    const thY = top + (p.ff_h - th.y) * scale;
+    const toY = (y) => top + (p.ff_h - Math.min(Math.max(y, 0), p.ff_h)) * scale;
+    drawTrail(collectTrail((d) => ({ x: cx, y: toY(d.y) })));
+
+    const thd = theoryAt(state.t);
+    const thY = toY(thd.y);
     if (p.airOn) drawSteelBall(cx, thY, ballR, true);
 
-    let curY = thY, curV = th.v;
+    let curY = thY, curV = thd.v;
     if (p.airOn) {
       const r = realAt(state.t);
-      const y = top + (p.ff_h - r.y) * scale;
+      const y = toY(r.y);
       drawSteelBall(cx, y, ballR, false);
       curY = y; curV = r.v;
     } else {
@@ -211,45 +304,42 @@ function drawFrame() {
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속도: ${curV.toFixed(2)} m/s`;
 
   } else if (state.motion === "projectile") {
-    const angleRad = (p.pj_angle * Math.PI) / 180;
-    const tLand = Physics.projectile.tLand(p.pj_v0, angleRad, p.pj_h0, p.g);
-    const vy0 = p.pj_v0 * Math.sin(angleRad);
-    const range = p.pj_v0 * Math.cos(angleRad) * tLand;
-    const maxHeight = p.pj_h0 + (vy0 * vy0) / (2 * p.g);
+    let maxX = 0.5, maxY = Math.max(p.pj_h0, 0.5);
+    for (const d of state.theoryData) { if (d.x > maxX) maxX = d.x; if (d.y > maxY) maxY = d.y; }
+    if (state.realData) for (const d of state.realData) { if (d.x > maxX) maxX = d.x; if (d.y > maxY) maxY = d.y; }
     const left = 40, bottom = H - 30, right = W - 20, top = 25;
-    const scaleX = (right - left) / Math.max(range, 0.001);
-    const scaleY = (bottom - top) / Math.max(maxHeight, 0.001);
+    const scaleX = (right - left) / maxX;
+    const scaleY = (bottom - top) / maxY;
     const scale = Math.min(scaleX, scaleY);
     const toPx = (x, y) => [left + x * scale, bottom - y * scale];
 
-    ctx.strokeStyle = "#3a4664";
+    ctx.strokeStyle = th.ground;
     ctx.beginPath(); ctx.moveTo(left, bottom); ctx.lineTo(right, bottom); ctx.stroke();
 
-    // 이론 궤적(점선)
+    // 이론 궤적 전체(점선)
     ctx.save();
-    ctx.strokeStyle = "rgba(148,163,184,0.6)";
+    ctx.strokeStyle = th.ghostStroke;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    for (let i = 0; i <= 60; i++) {
-      const t = (tLand * i) / 60;
-      const th = Physics.projectile.theoryAt(t, p.pj_v0, p.pj_angle, p.pj_h0, p.g);
-      const [x, y] = toPx(th.x, th.y);
+    state.theoryData.forEach((d, i) => {
+      const [x, y] = toPx(d.x, d.y);
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
+    });
     ctx.stroke();
     ctx.restore();
 
-    const th = Physics.projectile.theoryAt(state.t, p.pj_v0, p.pj_angle, p.pj_h0, p.g);
-    const [thx, thy] = toPx(th.x, th.y);
-    let curSpeed = th.speed;
+    drawTrail(collectTrail((d) => { const [x, y] = toPx(d.x, d.y); return { x, y }; }));
+
+    const thd = theoryAt(state.t);
+    const [thx, thy] = toPx(thd.x, thd.y);
+    let curSpeed = thd.speed;
 
     if (p.airOn) {
       drawSteelBall(thx, thy, ballR, true);
       ctx.save();
-      ctx.strokeStyle = "rgba(79,140,255,0.7)";
+      ctx.strokeStyle = th.realPath;
       ctx.beginPath();
-      const upto = Math.min(state.t, state.realData[state.realData.length - 1].t);
-      for (let i = 0; state.realData[i] && state.realData[i].t <= upto; i++) {
+      for (let i = 0; state.realData[i] && state.realData[i].t <= state.t; i++) {
         const [x, y] = toPx(state.realData[i].x, state.realData[i].y);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
@@ -268,32 +358,36 @@ function drawFrame() {
     const pivotX = W / 2, pivotY = 40;
     const maxDim = Math.min(W - 80, H - 80);
     const scale = maxDim / p.pd_L;
-    const th = Physics.pendulum.theoryAt(state.t, p.pd_L, p.pd_angle, p.g);
+    const thd = theoryAt(state.t);
+    const ballPos = (theta) => ({
+      x: pivotX + Math.sin(theta) * p.pd_L * scale,
+      y: pivotY + Math.cos(theta) * p.pd_L * scale,
+    });
 
-    ctx.fillStyle = "#3a4664";
+    ctx.fillStyle = th.ground;
     ctx.beginPath(); ctx.arc(pivotX, pivotY, 4, 0, Math.PI * 2); ctx.fill();
 
+    drawTrail(collectTrail((d) => ballPos(d.theta)));
+
     const drawArm = (theta, ghost) => {
-      const bx = pivotX + Math.sin(theta) * p.pd_L * scale;
-      const by = pivotY + Math.cos(theta) * p.pd_L * scale;
-      ctx.strokeStyle = ghost ? "rgba(148,163,184,0.5)" : "#5a6478";
+      const b = ballPos(theta);
+      ctx.strokeStyle = ghost ? th.ghostStroke : th.ground;
       ctx.setLineDash(ghost ? [3, 3] : []);
-      ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(b.x, b.y); ctx.stroke();
       ctx.setLineDash([]);
-      drawSteelBall(bx, by, ballR, ghost);
-      return { angVel: null };
+      drawSteelBall(b.x, b.y, ballR, ghost);
     };
 
-    let curAngDeg = (th.theta * 180) / Math.PI;
-    let curAngVel = (th.angVel * 180) / Math.PI;
+    let curAngDeg = (thd.theta * 180) / Math.PI;
+    let curAngVel = (thd.angVel * 180) / Math.PI;
     if (p.airOn) {
-      drawArm(th.theta, true);
+      drawArm(thd.theta, true);
       const r = realAt(state.t);
       drawArm(r.theta, false);
       curAngDeg = (r.theta * 180) / Math.PI;
       curAngVel = (r.angVel * 180) / Math.PI;
     } else {
-      drawArm(th.theta, false);
+      drawArm(thd.theta, false);
     }
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${curAngVel.toFixed(1)} °/s`;
   }
@@ -309,43 +403,34 @@ function tick(ts) {
   const speed = parseFloat(els.speed.value);
   state.t += dt * speed;
   if (state.t >= state.tEnd) {
-    state.t = state.tEnd;
-    state.playing = false;
-    els.playBtn.textContent = "▶ 재생";
+    // 운동이 끝나지 않고 처음부터 이어서 반복 재생된다.
+    state.t = state.tEnd > 0 ? state.t % state.tEnd : 0;
   }
   drawFrame();
-  if (state.playing) requestAnimationFrame(tick);
+  requestAnimationFrame(tick);
 }
 
 // ---------------- 그래프 ----------------
 function buildChart(p) {
-  let labelX = "시간 (s)", labelY = "", theoryPts = [], realPts = [];
+  let labelX = "시간 (s)", labelY = "";
+  const th = theme();
 
   if (state.motion === "freefall") {
     labelY = "높이 (m)";
-    for (let i = 0; i <= 100; i++) {
-      const t = (state.tEnd * i) / 100;
-      theoryPts.push({ x: t, y: Physics.freeFall.theoryAt(t, p.ff_h, p.g).y });
-    }
-    if (state.realData) realPts = state.realData.map((d) => ({ x: d.t, y: d.y }));
   } else if (state.motion === "projectile") {
     labelX = "수평 거리 (m)"; labelY = "높이 (m)";
-    const angleRad = (p.pj_angle * Math.PI) / 180;
-    const tLand = Physics.projectile.tLand(p.pj_v0, angleRad, p.pj_h0, p.g);
-    for (let i = 0; i <= 100; i++) {
-      const t = (tLand * i) / 100;
-      const th = Physics.projectile.theoryAt(t, p.pj_v0, p.pj_angle, p.pj_h0, p.g);
-      theoryPts.push({ x: th.x, y: th.y });
-    }
-    if (state.realData) realPts = state.realData.map((d) => ({ x: d.x, y: d.y }));
   } else if (state.motion === "pendulum") {
     labelY = "각도 (°)";
-    for (let i = 0; i <= 150; i++) {
-      const t = (state.tEnd * i) / 150;
-      theoryPts.push({ x: t, y: (Physics.pendulum.theoryAt(t, p.pd_L, p.pd_angle, p.g).theta * 180) / Math.PI });
-    }
-    if (state.realData) realPts = state.realData.map((d) => ({ x: d.t, y: (d.theta * 180) / Math.PI }));
   }
+
+  const toPoint = (motion, d) => {
+    if (motion === "freefall") return { x: d.t, y: d.y };
+    if (motion === "projectile") return { x: d.x, y: d.y };
+    return { x: d.t, y: (d.theta * 180) / Math.PI };
+  };
+
+  const theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
+  const realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
 
   if (state.chart) state.chart.destroy();
   state.chart = new Chart(els.chartCanvas.getContext("2d"), {
@@ -355,7 +440,7 @@ function buildChart(p) {
         {
           label: "이론값",
           data: theoryPts,
-          borderColor: "#9aa7c2",
+          borderColor: th.chartTheory,
           borderDash: [5, 4],
           pointRadius: 0,
           borderWidth: 2,
@@ -364,7 +449,7 @@ function buildChart(p) {
         ...(p.airOn ? [{
           label: "실제값 (공기저항)",
           data: realPts,
-          borderColor: "#4f8cff",
+          borderColor: th.chartReal,
           pointRadius: 0,
           borderWidth: 2,
           tension: 0.1,
@@ -372,8 +457,8 @@ function buildChart(p) {
         {
           label: "현재",
           data: [],
-          borderColor: "#ffb347",
-          backgroundColor: "#ffb347",
+          borderColor: th.chartMarker,
+          backgroundColor: th.chartMarker,
           pointRadius: 5,
           showLine: false,
         },
@@ -385,11 +470,11 @@ function buildChart(p) {
       maintainAspectRatio: false,
       parsing: false,
       scales: {
-        x: { type: "linear", title: { display: true, text: labelX, color: "#9aa7c2" }, ticks: { color: "#9aa7c2" }, grid: { color: "#2a3654" } },
-        y: { title: { display: true, text: labelY, color: "#9aa7c2" }, ticks: { color: "#9aa7c2" }, grid: { color: "#2a3654" } },
+        x: { type: "linear", title: { display: true, text: labelX, color: th.chartTick }, ticks: { color: th.chartTick }, grid: { color: th.chartGrid } },
+        y: { title: { display: true, text: labelY, color: th.chartTick }, ticks: { color: th.chartTick }, grid: { color: th.chartGrid } },
       },
       plugins: {
-        legend: { labels: { color: "#e6ebf5" } },
+        legend: { labels: { color: th.chartLegend } },
       },
     },
   });
@@ -400,13 +485,13 @@ function updateChartMarker() {
   const p = getParams();
   let point = null;
   if (state.motion === "freefall") {
-    const src = p.airOn ? realAt(state.t) : Physics.freeFall.theoryAt(state.t, p.ff_h, p.g);
+    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
     point = { x: state.t, y: src.y };
   } else if (state.motion === "projectile") {
-    const src = p.airOn ? realAt(state.t) : Physics.projectile.theoryAt(state.t, p.pj_v0, p.pj_angle, p.pj_h0, p.g);
+    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
     point = { x: src.x, y: src.y };
   } else if (state.motion === "pendulum") {
-    const src = p.airOn ? realAt(state.t) : Physics.pendulum.theoryAt(state.t, p.pd_L, p.pd_angle, p.g);
+    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
     point = { x: state.t, y: (src.theta * 180) / Math.PI };
   }
   const markerIdx = state.chart.data.datasets.length - 1;
@@ -455,24 +540,24 @@ function buildTable(p) {
     const tt = Math.min(i * step, state.tEnd);
     let cells = [];
     if (state.motion === "freefall") {
-      const th = Physics.freeFall.theoryAt(tt, p.ff_h, p.g);
+      const thd = theoryAt(tt);
       if (p.airOn) {
         const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.y), fmt(th.y), errCell(r.y, th.y), fmt(r.v), fmt(th.v), errCell(r.v, th.v)];
+        cells = [fmt(tt, 2), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
       } else {
-        cells = [fmt(tt, 2), fmt(th.y), fmt(th.v)];
+        cells = [fmt(tt, 2), fmt(thd.y), fmt(thd.v)];
       }
     } else if (state.motion === "projectile") {
-      const th = Physics.projectile.theoryAt(tt, p.pj_v0, p.pj_angle, p.pj_h0, p.g);
+      const thd = theoryAt(tt);
       if (p.airOn) {
         const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.x), fmt(th.x), errCell(r.x, th.x), fmt(r.y), fmt(th.y), errCell(r.y, th.y)];
+        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y)];
       } else {
-        cells = [fmt(tt, 2), fmt(th.x), fmt(th.y), fmt(th.speed)];
+        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.y), fmt(thd.speed)];
       }
     } else if (state.motion === "pendulum") {
-      const th = Physics.pendulum.theoryAt(tt, p.pd_L, p.pd_angle, p.g);
-      const thDeg = (th.theta * 180) / Math.PI, thAV = (th.angVel * 180) / Math.PI;
+      const thd = theoryAt(tt);
+      const thDeg = (thd.theta * 180) / Math.PI, thAV = (thd.angVel * 180) / Math.PI;
       if (p.airOn) {
         const r = realAt(tt);
         const rDeg = (r.theta * 180) / Math.PI, rAV = (r.angVel * 180) / Math.PI;
@@ -488,4 +573,4 @@ function buildTable(p) {
 }
 
 // 초기 실행
-computeAll();
+applyTheme(savedTheme);

@@ -1,5 +1,8 @@
 // 물리 계산 모듈: 자유낙하 / 포물선 운동 / 단진자 운동
-// 이론값 = 닫힌형 공식(공기저항 없음), 실제값 = RK4 수치적분(공기저항 포함)
+// 이론(k=0) / 실제(k>0, 공기저항) 모두 같은 RK4 적분기를 사용하고,
+// 자유낙하·포물선은 바닥에서 반발계수만큼 튕기며, 단진자는 감쇠 진동한다.
+// 각 simulate()는 일정 시간(정지/한계) 이후 멈추는 "한 사이클" 데이터를 만들고,
+// 재생 쪽(main.js)에서 이 사이클을 반복 재생해 운동이 끝없이 이어지는 것처럼 보이게 한다.
 
 const STEEL_DENSITY = 7850; // kg/m^3, 강철 밀도
 
@@ -29,102 +32,116 @@ function rk4Step(state, dt, deriv) {
   return state.map((v, i) => v + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
 }
 
+function sampleAt(data, dt, t) {
+  const idx = Math.min(data.length - 1, Math.max(0, Math.round(t / dt)));
+  return data[idx];
+}
+
 const Physics = {
-  // ---------------- 자유낙하 ----------------
+  sampleAt,
+
+  // ---------------- 자유낙하 (바닥에서 반발) ----------------
   freeFall: {
-    tLand(h, g) {
-      return Math.sqrt((2 * h) / g);
-    },
-    theoryAt(t, h, g) {
-      const tLand = this.tLand(h, g);
-      const tt = Math.min(t, tLand);
-      const s = 0.5 * g * tt * tt;
-      return { y: Math.max(h - s, 0), v: g * tt, landed: t >= tLand, tLand };
-    },
-    simulateReal(h, g, m, k, dt, tMax = 60) {
-      let state = [0, 0]; // [낙하거리 s, 속도 v]
+    // state: [y(바닥 기준 높이), vy(+ 위, - 아래)]
+    simulate(h, g, m, k, restitution, dt) {
+      let state = [h, 0];
       let t = 0;
-      const data = [{ t, s: 0, v: 0, y: h }];
-      const deriv = ([s, v]) => [v, g - (k / m) * v * Math.abs(v)];
-      while (state[0] < h && t < tMax) {
+      const data = [{ t, y: h, v: 0 }];
+      const deriv = ([y, vy]) => [vy, -g - (k > 0 ? (k / m) * vy * Math.abs(vy) : 0)];
+      const tMax = 40;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < tMax) {
         state = rk4Step(state, dt, deriv);
         t += dt;
-        const s = Math.min(state[0], h);
-        data.push({ t, s, v: state[1], y: Math.max(h - s, 0) });
-        if (s >= h) break;
+        if (state[0] <= 0 && state[1] < 0) {
+          state[0] = 0;
+          state[1] = -state[1] * restitution;
+        }
+        data.push({ t, y: Math.max(state[0], 0), v: state[1] });
+        if (Math.abs(state[0]) < 0.004 && Math.abs(state[1]) < 0.06) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
       }
       return data;
     },
   },
 
-  // ---------------- 포물선 운동 ----------------
+  // ---------------- 포물선 운동 (바닥에서 반발) ----------------
   projectile: {
-    tLand(v0, angleRad, h0, g) {
-      const vy0 = v0 * Math.sin(angleRad);
-      const a = -0.5 * g,
-        b = vy0,
-        c = h0;
-      const disc = b * b - 4 * a * c;
-      return (-b - Math.sqrt(disc)) / (2 * a);
-    },
-    theoryAt(t, v0, angleDeg, h0, g) {
-      const angle = (angleDeg * Math.PI) / 180;
-      const vx0 = v0 * Math.cos(angle);
-      const vy0 = v0 * Math.sin(angle);
-      const tLand = this.tLand(v0, angle, h0, g);
-      const tt = Math.min(t, tLand);
-      const x = vx0 * tt;
-      const y = Math.max(h0 + vy0 * tt - 0.5 * g * tt * tt, 0);
-      const vx = vx0;
-      const vy = vy0 - g * tt;
-      return { x, y, vx, vy, speed: Math.hypot(vx, vy), landed: t >= tLand, tLand };
-    },
-    simulateReal(v0, angleDeg, h0, g, m, k, dt, tMax = 60) {
+    simulate(v0, angleDeg, h0, g, m, k, restitution, dt) {
       const angle = (angleDeg * Math.PI) / 180;
       let state = [0, h0, v0 * Math.cos(angle), v0 * Math.sin(angle)]; // x,y,vx,vy
       let t = 0;
       const data = [{ t, x: 0, y: h0, vx: state[2], vy: state[3], speed: v0 }];
-      const deriv = ([x, y, vx, vy]) => {
+      const deriv = ([, , vx, vy]) => {
         const speed = Math.hypot(vx, vy);
-        return [vx, vy, -(k / m) * speed * vx, -g - (k / m) * speed * vy];
+        const drag = k > 0 ? (k / m) * speed : 0;
+        return [vx, vy, -drag * vx, -g - drag * vy];
       };
-      while (state[1] >= 0 && t < tMax) {
+      const tMax = 40;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < tMax) {
         state = rk4Step(state, dt, deriv);
         t += dt;
-        const y = Math.max(state[1], 0);
-        data.push({ t, x: state[0], y, vx: state[2], vy: state[3], speed: Math.hypot(state[2], state[3]) });
-        if (state[1] <= 0) break;
+        if (state[1] <= 0 && state[3] < 0) {
+          state[1] = 0;
+          state[3] = -state[3] * restitution;
+          state[2] = state[2] * 0.85; // 바닥 마찰로 수평 속도 일부 손실
+        }
+        const speed = Math.hypot(state[2], state[3]);
+        data.push({ t, x: state[0], y: Math.max(state[1], 0), vx: state[2], vy: state[3], speed });
+        if (Math.abs(state[1]) < 0.004 && speed < 0.08) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
       }
       return data;
     },
   },
 
-  // ---------------- 단진자 운동 ----------------
+  // ---------------- 단진자 운동 (감쇠) ----------------
   pendulum: {
     period(L, g) {
       return 2 * Math.PI * Math.sqrt(L / g);
     },
-    theoryAt(t, L, theta0Deg, g) {
+    // k=0(이론)이면 minPeriods 만큼 정확히 돌고 멈춘다 (반복 재생 시 이음매가 자연스럽도록).
+    // k>0(실제, 공기저항)이면 감쇠로 멈추거나, minPeriods를 다 채우거나, 최대 한계까지 돈다.
+    simulate(L, theta0Deg, g, m, k, minPeriods, dt) {
       const theta0 = (theta0Deg * Math.PI) / 180;
-      const omega0 = Math.sqrt(g / L);
-      const theta = theta0 * Math.cos(omega0 * t);
-      const angVel = -theta0 * omega0 * Math.sin(omega0 * t);
-      return { theta, angVel };
-    },
-    simulateReal(L, theta0Deg, g, m, k, dt, tEnd) {
-      const theta0 = (theta0Deg * Math.PI) / 180;
-      let state = [theta0, 0]; // theta, omega
+      let state = [theta0, 0];
       let t = 0;
       const data = [{ t, theta: theta0, angVel: 0 }];
       const deriv = ([theta, omega]) => {
         const gravTerm = -(g / L) * Math.sin(theta);
-        const dragTerm = -((k * L) / m) * omega * Math.abs(omega);
+        const dragTerm = k > 0 ? -((k * L) / m) * omega * Math.abs(omega) : 0;
         return [omega, gravTerm + dragTerm];
       };
-      while (t < tEnd) {
+      const T = this.period(L, g);
+      const minT = Math.max(minPeriods, 1) * T;
+      const hardCap = 60;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < hardCap) {
         state = rk4Step(state, dt, deriv);
         t += dt;
         data.push({ t, theta: state[0], angVel: state[1] });
+        if (k === 0) {
+          if (t >= minT) break; // 무손실: 정확히 요청한 주기 수에서 끊어 매끄럽게 반복
+          continue;
+        }
+        if (t >= minT && Math.abs(state[0]) < 0.01 && Math.abs(state[1]) < 0.02) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
       }
       return data;
     },
