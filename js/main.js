@@ -89,6 +89,7 @@ let state = {
   realDuration: 0,
   chart: null,
   lastTs: null,
+  dragThetaDeg: null, // 캔버스에서 쇠구슬을 드래그하는 동안의 임시 각도
 };
 
 function theme() {
@@ -134,14 +135,18 @@ let savedTheme = "dark";
 try { savedTheme = localStorage.getItem("physicsSimTheme") || "dark"; } catch (e) {}
 
 // ---------------- 모션 전환 ----------------
+function setMotion(motion) {
+  els.motionBtns.forEach((b) => b.classList.toggle("active", b.dataset.motion === motion));
+  state.motion = motion;
+  els.panels.forEach((p) => {
+    p.classList.toggle("hidden", p.dataset.motionPanel !== state.motion);
+  });
+  els.canvas.classList.toggle("pendulum-mode", motion === "pendulum");
+}
+
 els.motionBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
-    els.motionBtns.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    state.motion = btn.dataset.motion;
-    els.panels.forEach((p) => {
-      p.classList.toggle("hidden", p.dataset.motionPanel !== state.motion);
-    });
+    setMotion(btn.dataset.motion);
     resetPlayback();
     computeAll();
   });
@@ -189,11 +194,7 @@ els.resetAllBtn.addEventListener("click", () => {
   els.speed.value = "1";
   els.graphType.value = "st";
   state.graphType = "st";
-  const freefallBtn = document.querySelector('.motion-btn[data-motion="freefall"]');
-  els.motionBtns.forEach((b) => b.classList.remove("active"));
-  freefallBtn.classList.add("active");
-  state.motion = "freefall";
-  els.panels.forEach((pnl) => pnl.classList.toggle("hidden", pnl.dataset.motionPanel !== state.motion));
+  setMotion("freefall");
   resetPlayback();
   computeAll();
 });
@@ -399,10 +400,7 @@ function drawFrame() {
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속력: ${curSpeed.toFixed(2)} m/s`;
 
   } else if (state.motion === "pendulum") {
-    const pivotX = W / 2, pivotY = 40;
-    const maxDim = Math.min(W - 80, H - 80);
-    const scale = maxDim / p.pd_L;
-    const thd = theoryAt(state.t);
+    const { pivotX, pivotY, scale } = pendulumGeometry(p);
     const ballPos = (theta) => ({
       x: pivotX + Math.sin(theta) * p.pd_L * scale,
       y: pivotY + Math.cos(theta) * p.pd_L * scale,
@@ -411,6 +409,17 @@ function drawFrame() {
     ctx.fillStyle = th.ground;
     ctx.beginPath(); ctx.arc(pivotX, pivotY, 4, 0, Math.PI * 2); ctx.fill();
 
+    if (state.dragThetaDeg !== null) {
+      const dragTheta = (state.dragThetaDeg * Math.PI) / 180;
+      const b = ballPos(dragTheta);
+      ctx.strokeStyle = th.ground;
+      ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(b.x, b.y); ctx.stroke();
+      drawSteelBall(b.x, b.y, ballR, false);
+      els.readout.textContent = `초기 각도 설정 중: ${state.dragThetaDeg.toFixed(1)}°`;
+      return;
+    }
+
+    const thd = theoryAt(state.t);
     drawTrail(collectTrail((d) => ballPos(d.theta)));
 
     const drawArm = (theta, ghost) => {
@@ -453,6 +462,74 @@ function tick(ts) {
   drawFrame();
   requestAnimationFrame(tick);
 }
+
+// ---------------- 단진자 드래그로 초기 각도 설정 ----------------
+const MAX_DRAG_ANGLE_DEG = 175;
+const dragState = { active: false };
+
+function pendulumGeometry(p) {
+  const W = els.canvas.width, H = els.canvas.height;
+  // 각도가 90°를 넘으면 공이 축보다 위로 올라가므로, 축을 중앙에 두고
+  // 반경 L*scale의 원 전체(-175°~175°)가 캔버스 안에 들어오게 계산한다.
+  const margin = 40;
+  const maxRadius = Math.min(W, H) / 2 - margin;
+  return { pivotX: W / 2, pivotY: H / 2, scale: maxRadius / p.pd_L };
+}
+
+function canvasPoint(evt) {
+  const rect = els.canvas.getBoundingClientRect();
+  const src = evt.touches && evt.touches[0] ? evt.touches[0] : evt;
+  return {
+    x: (src.clientX - rect.left) * (els.canvas.width / rect.width),
+    y: (src.clientY - rect.top) * (els.canvas.height / rect.height),
+  };
+}
+
+function startDrag(evt) {
+  if (state.motion !== "pendulum") return;
+  const p = getParams();
+  const { pivotX, pivotY, scale } = pendulumGeometry(p);
+  const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+  const ballX = pivotX + Math.sin(src.theta) * p.pd_L * scale;
+  const ballY = pivotY + Math.cos(src.theta) * p.pd_L * scale;
+  const pt = canvasPoint(evt);
+  if (Math.hypot(pt.x - ballX, pt.y - ballY) > 26) return;
+  dragState.active = true;
+  els.canvas.classList.add("dragging");
+  state.playing = false;
+  els.playBtn.textContent = "▶ 재생";
+  updateDrag(evt);
+}
+
+function updateDrag(evt) {
+  if (!dragState.active) return;
+  if (evt.type === "touchmove") evt.preventDefault(); // touchstart는 passive라 여기선 호출하지 않음
+  const p = getParams();
+  const { pivotX, pivotY } = pendulumGeometry(p);
+  const pt = canvasPoint(evt);
+  const dx = pt.x - pivotX, dy = pt.y - pivotY;
+  let thetaDeg = (Math.atan2(dx, dy) * 180) / Math.PI;
+  thetaDeg = Math.max(-MAX_DRAG_ANGLE_DEG, Math.min(MAX_DRAG_ANGLE_DEG, thetaDeg));
+  state.dragThetaDeg = thetaDeg;
+  drawFrame();
+}
+
+function endDrag() {
+  if (!dragState.active) return;
+  dragState.active = false;
+  els.canvas.classList.remove("dragging");
+  const finalDeg = Math.round(state.dragThetaDeg * 10) / 10;
+  state.dragThetaDeg = null;
+  els.pd_angle.value = finalDeg;
+  els.pd_angle.dispatchEvent(new Event("input"));
+}
+
+els.canvas.addEventListener("mousedown", startDrag);
+document.addEventListener("mousemove", updateDrag);
+document.addEventListener("mouseup", endDrag);
+els.canvas.addEventListener("touchstart", startDrag, { passive: true });
+document.addEventListener("touchmove", updateDrag, { passive: false });
+document.addEventListener("touchend", endDrag);
 
 // ---------------- 그래프 ----------------
 function buildChart(p) {
