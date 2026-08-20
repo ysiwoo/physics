@@ -21,6 +21,15 @@ const els = {
   pd_length: document.getElementById("pd_length"),
   pd_angle: document.getElementById("pd_angle"),
   pd_periods: document.getElementById("pd_periods"),
+  mm_track: document.getElementById("mm_track"),
+  mm_v0: document.getElementById("mm_v0"),
+  mm_restitution: document.getElementById("mm_restitution"),
+  ci_radius: document.getElementById("ci_radius"),
+  ci_v0: document.getElementById("ci_v0"),
+  ci_periods: document.getElementById("ci_periods"),
+  sh_springK: document.getElementById("sh_springK"),
+  sh_x0: document.getElementById("sh_x0"),
+  sh_periods: document.getElementById("sh_periods"),
   playBtn: document.getElementById("playBtn"),
   resetBtn: document.getElementById("resetBtn"),
   resetAllBtn: document.getElementById("resetAllBtn"),
@@ -71,10 +80,14 @@ const GRAPH_TYPES = {
   vt: { field: "v", label: "속도", unit: "m/s" },
   at: { field: "a", label: "가속도", unit: "m/s²" },
   Ft: { field: "F", label: "힘", unit: "N" },
+  pt: { field: "p", label: "운동량", unit: "kg·m/s" },
   keT: { field: "KE", label: "운동 에너지", unit: "J" },
   peT: { field: "PE", label: "위치 에너지", unit: "J" },
   meT: { field: "ME", label: "역학적 에너지", unit: "J" },
 };
+
+// 이론(k=0)이 손실 없이 정확히 주기적인 운동들 — theoryAt/derivedAt에서 위상을 감아 반복시킨다.
+const PERIODIC_MOTIONS = ["pendulum", "circular", "shm"];
 
 let state = {
   motion: "freefall",
@@ -115,6 +128,15 @@ function getParams() {
     pd_L: parseFloat(els.pd_length.value),
     pd_angle: parseFloat(els.pd_angle.value),
     pd_periods: parseFloat(els.pd_periods.value),
+    mm_D: parseFloat(els.mm_track.value),
+    mm_v0: parseFloat(els.mm_v0.value),
+    mm_e: parseFloat(els.mm_restitution.value),
+    ci_R: parseFloat(els.ci_radius.value),
+    ci_v0: parseFloat(els.ci_v0.value),
+    ci_periods: parseFloat(els.ci_periods.value),
+    sh_k: parseFloat(els.sh_springK.value),
+    sh_x0: parseFloat(els.sh_x0.value),
+    sh_periods: parseFloat(els.sh_periods.value),
   };
 }
 
@@ -168,7 +190,10 @@ els.massFromRadius.addEventListener("click", () => {
 
 [els.mass, els.radius, els.gravity, els.airDensity, els.dragCoef,
  els.ff_height, els.ff_restitution, els.pj_v0, els.pj_angle, els.pj_h0, els.pj_restitution,
- els.pd_length, els.pd_angle, els.pd_periods].forEach((input) => {
+ els.pd_length, els.pd_angle, els.pd_periods,
+ els.mm_track, els.mm_v0, els.mm_restitution,
+ els.ci_radius, els.ci_v0, els.ci_periods,
+ els.sh_springK, els.sh_x0, els.sh_periods].forEach((input) => {
   input.addEventListener("input", () => {
     resetPlayback();
     computeAll();
@@ -225,6 +250,15 @@ function computeAll() {
   } else if (state.motion === "pendulum") {
     state.theoryData = Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, 0, p.pd_periods, SIM_DT);
     state.realData = p.airOn ? Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, p.pd_periods, SIM_DT) : null;
+  } else if (state.motion === "momentum") {
+    state.theoryData = Physics.momentum.simulate(p.mm_D, p.mm_v0, p.massKg, 0, p.mm_e, SIM_DT);
+    state.realData = p.airOn ? Physics.momentum.simulate(p.mm_D, p.mm_v0, p.massKg, p.k, p.mm_e, SIM_DT) : null;
+  } else if (state.motion === "circular") {
+    state.theoryData = Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, 0, p.ci_periods, SIM_DT);
+    state.realData = p.airOn ? Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, p.k, p.ci_periods, SIM_DT) : null;
+  } else if (state.motion === "shm") {
+    state.theoryData = Physics.shm.simulate(p.sh_k, p.sh_x0, p.massKg, 0, p.sh_periods, SIM_DT);
+    state.realData = p.airOn ? Physics.shm.simulate(p.sh_k, p.sh_x0, p.massKg, p.k, p.sh_periods, SIM_DT) : null;
   }
 
   state.theoryDuration = state.theoryData[state.theoryData.length - 1].t;
@@ -239,7 +273,7 @@ function computeAll() {
 // 단진자 이론(k=0)은 손실이 없어 정확히 주기적으로 반복되므로,
 // tEnd가 이론 길이보다 길어져도(감쇠가 느린 실제값에 맞춰) 위상을 이어서 보여준다.
 function theoryAt(t) {
-  if (state.motion === "pendulum" && state.theoryDuration > 0) {
+  if (PERIODIC_MOTIONS.includes(state.motion) && state.theoryDuration > 0) {
     const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
     return Physics.sampleAt(state.theoryData, SIM_DT, wrapped);
   }
@@ -254,7 +288,7 @@ function realAt(t) {
 function derivedAt(t, useReal) {
   const arr = useReal ? state.realDerived : state.theoryDerived;
   if (!arr) return null;
-  if (!useReal && state.motion === "pendulum" && state.theoryDuration > 0) {
+  if (!useReal && PERIODIC_MOTIONS.includes(state.motion) && state.theoryDuration > 0) {
     const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
     return Physics.sampleAt(arr, SIM_DT, wrapped);
   }
@@ -443,6 +477,116 @@ function drawFrame() {
       drawArm(thd.theta, false);
     }
     els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${curAngVel.toFixed(1)} °/s`;
+
+  } else if (state.motion === "momentum") {
+    const left = 40, right = W - 40, midY = H / 2;
+    const scale = (right - left) / p.mm_D;
+    const toX = (x) => left + Math.min(Math.max(x, 0), p.mm_D) * scale;
+
+    ctx.strokeStyle = th.ground;
+    ctx.beginPath(); ctx.moveTo(left, midY - 40); ctx.lineTo(left, midY + 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(right, midY - 40); ctx.lineTo(right, midY + 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(left, midY); ctx.lineTo(right, midY); ctx.stroke();
+
+    drawTrail(collectTrail((d) => ({ x: toX(d.x), y: midY })));
+
+    const thd = theoryAt(state.t);
+    const thX = toX(thd.x);
+    if (p.airOn) drawSteelBall(thX, midY, ballR, true);
+
+    let curV = thd.v;
+    if (p.airOn) {
+      const r = realAt(state.t);
+      drawSteelBall(toX(r.x), midY, ballR, false);
+      curV = r.v;
+    } else {
+      drawSteelBall(thX, midY, ballR, false);
+    }
+    const momentum = p.massKg * curV;
+    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   속도: ${curV.toFixed(2)} m/s   운동량: ${momentum.toFixed(4)} kg·m/s`;
+
+  } else if (state.motion === "circular") {
+    const cx = W / 2, cy = H / 2;
+    const margin = 40;
+    const scale = (Math.min(W, H) / 2 - margin) / p.ci_R;
+    const posAt = (theta) => ({ x: cx + Math.cos(theta) * p.ci_R * scale, y: cy + Math.sin(theta) * p.ci_R * scale });
+
+    ctx.save();
+    ctx.strokeStyle = th.ghostStroke;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy, p.ci_R * scale, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = th.ground;
+    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+
+    drawTrail(collectTrail((d) => posAt(d.theta)));
+
+    const thd = theoryAt(state.t);
+    const thPos = posAt(thd.theta);
+    if (p.airOn) drawSteelBall(thPos.x, thPos.y, ballR, true);
+
+    let curOmegaDeg = (thd.omega * 180) / Math.PI;
+    if (p.airOn) {
+      const r = realAt(state.t);
+      const rPos = posAt(r.theta);
+      drawSteelBall(rPos.x, rPos.y, ballR, false);
+      curOmegaDeg = (r.omega * 180) / Math.PI;
+    } else {
+      drawSteelBall(thPos.x, thPos.y, ballR, false);
+    }
+    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각속도: ${curOmegaDeg.toFixed(1)} °/s`;
+
+  } else if (state.motion === "shm") {
+    const midY = H / 2;
+    const anchorX = 60;
+    const eqX = W / 2 + 30;
+    let maxAbsX = 0.05;
+    for (const d of state.theoryData) maxAbsX = Math.max(maxAbsX, Math.abs(d.x));
+    if (state.realData) for (const d of state.realData) maxAbsX = Math.max(maxAbsX, Math.abs(d.x));
+    const leftBound = (eqX - anchorX - 20) / maxAbsX;
+    const rightBound = (W - 40 - eqX) / maxAbsX;
+    const scale = Math.min(leftBound, rightBound);
+    const toX = (x) => eqX + x * scale;
+
+    const drawSpring = (endX, color) => {
+      const segs = 14;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(anchorX, midY);
+      for (let i = 1; i < segs; i++) {
+        const t = i / segs;
+        const x = anchorX + (endX - anchorX) * t;
+        const y = midY + (i % 2 === 0 ? -10 : 10);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(endX, midY);
+      ctx.stroke();
+    };
+
+    ctx.strokeStyle = th.ground;
+    ctx.beginPath(); ctx.moveTo(anchorX, midY - 30); ctx.lineTo(anchorX, midY + 30); ctx.stroke();
+
+    drawTrail(collectTrail((d) => ({ x: toX(d.x), y: midY })));
+
+    const thd = theoryAt(state.t);
+    const thX = toX(thd.x);
+    if (p.airOn) {
+      drawSpring(thX, th.ghostStroke);
+      drawSteelBall(thX, midY, ballR, true);
+    }
+
+    let curV = thd.v, curX = thd.x;
+    if (p.airOn) {
+      const r = realAt(state.t);
+      const x = toX(r.x);
+      drawSpring(x, th.ground);
+      drawSteelBall(x, midY, ballR, false);
+      curV = r.v; curX = r.x;
+    } else {
+      drawSpring(thX, th.ground);
+      drawSteelBall(thX, midY, ballR, false);
+    }
+    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   변위: ${curX.toFixed(3)} m   속도: ${curV.toFixed(2)} m/s`;
   }
 
   updateChartMarker();
@@ -545,7 +689,10 @@ function buildChart(p) {
     const toPoint = (motion, d) => {
       if (motion === "freefall") return { x: d.t, y: d.y };
       if (motion === "projectile") return { x: d.x, y: d.y };
-      return { x: d.t, y: (d.theta * 180) / Math.PI };
+      if (motion === "pendulum") return { x: d.t, y: (d.theta * 180) / Math.PI };
+      if (motion === "momentum") return { x: d.t, y: d.x };
+      if (motion === "circular") return { x: d.t, y: (d.theta * 180) / Math.PI };
+      return { x: d.t, y: d.x }; // shm
     };
     if (state.motion === "freefall") {
       labelY = "높이 (m)";
@@ -553,14 +700,21 @@ function buildChart(p) {
       labelX = "수평 거리 (m)"; labelY = "높이 (m)";
     } else if (state.motion === "pendulum") {
       labelY = "각도 (°)";
+    } else if (state.motion === "momentum") {
+      labelY = "위치 (m)";
+    } else if (state.motion === "circular") {
+      labelY = "회전각 (°, 누적)";
+    } else if (state.motion === "shm") {
+      labelY = "변위 (m)";
     }
     theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
     realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
   } else {
     const info = GRAPH_TYPES[gt];
     labelY = `${info.label} (${info.unit})`;
-    state.theoryDerived = Physics.derive(state.theoryData, state.motion, p.massKg, p.g, p.pd_L);
-    state.realDerived = state.realData ? Physics.derive(state.realData, state.motion, p.massKg, p.g, p.pd_L) : null;
+    const extra = { L: p.pd_L, R: p.ci_R, springK: p.sh_k };
+    state.theoryDerived = Physics.derive(state.theoryData, state.motion, p.massKg, p.g, extra);
+    state.realDerived = state.realData ? Physics.derive(state.realData, state.motion, p.massKg, p.g, extra) : null;
     theoryPts = state.theoryDerived.map((d) => ({ x: d.t, y: d[info.field] }));
     realPts = state.realDerived ? state.realDerived.map((d) => ({ x: d.t, y: d[info.field] })) : [];
   }
@@ -634,6 +788,15 @@ function updateChartMarker() {
     } else if (state.motion === "pendulum") {
       const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
       point = { x: state.t, y: (src.theta * 180) / Math.PI };
+    } else if (state.motion === "momentum") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: state.t, y: src.x };
+    } else if (state.motion === "circular") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: state.t, y: (src.theta * 180) / Math.PI };
+    } else if (state.motion === "shm") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: state.t, y: src.x };
     }
   } else {
     const info = GRAPH_TYPES[state.graphType];
@@ -679,6 +842,18 @@ function buildTable(p) {
     headers = p.airOn
       ? ["시간(s)", "실제 각도(°)", "이론 각도(°)", "각도 오차율", "실제 각속도(°/s)", "이론 각속도(°/s)", "각속도 오차율"]
       : ["시간(s)", "각도(°)", "각속도(°/s)"];
+  } else if (state.motion === "momentum") {
+    headers = p.airOn
+      ? ["시간(s)", "실제 위치(m)", "이론 위치(m)", "위치 오차율", "실제 운동량(kg·m/s)", "이론 운동량(kg·m/s)", "운동량 오차율"]
+      : ["시간(s)", "위치(m)", "속도(m/s)", "운동량(kg·m/s)"];
+  } else if (state.motion === "circular") {
+    headers = p.airOn
+      ? ["시간(s)", "실제 회전각(°)", "이론 회전각(°)", "회전각 오차율", "실제 각속도(°/s)", "이론 각속도(°/s)", "각속도 오차율"]
+      : ["시간(s)", "회전각(°)", "각속도(°/s)"];
+  } else if (state.motion === "shm") {
+    headers = p.airOn
+      ? ["시간(s)", "실제 변위(m)", "이론 변위(m)", "변위 오차율", "실제 속도(m/s)", "이론 속도(m/s)", "속도 오차율"]
+      : ["시간(s)", "변위(m)", "속도(m/s)"];
   }
   els.tableHead.innerHTML = headers.map((h) => `<th>${h}</th>`).join("");
 
@@ -710,6 +885,32 @@ function buildTable(p) {
         cells = [fmt(tt, 2), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
       } else {
         cells = [fmt(tt, 2), fmt(thDeg), fmt(thAV)];
+      }
+    } else if (state.motion === "momentum") {
+      const thd = theoryAt(tt);
+      if (p.airOn) {
+        const r = realAt(tt);
+        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(p.massKg * r.v, 4), fmt(p.massKg * thd.v, 4), errCell(p.massKg * r.v, p.massKg * thd.v)];
+      } else {
+        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.v), fmt(p.massKg * thd.v, 4)];
+      }
+    } else if (state.motion === "circular") {
+      const thd = theoryAt(tt);
+      const thDeg = (thd.theta * 180) / Math.PI, thAV = (thd.omega * 180) / Math.PI;
+      if (p.airOn) {
+        const r = realAt(tt);
+        const rDeg = (r.theta * 180) / Math.PI, rAV = (r.omega * 180) / Math.PI;
+        cells = [fmt(tt, 2), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
+      } else {
+        cells = [fmt(tt, 2), fmt(thDeg), fmt(thAV)];
+      }
+    } else if (state.motion === "shm") {
+      const thd = theoryAt(tt);
+      if (p.airOn) {
+        const r = realAt(tt);
+        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
+      } else {
+        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.v)];
       }
     }
     rows.push(`<tr>${cells.map((c) => (typeof c === "string" && c.startsWith("<td")) ? c : `<td>${c}</td>`).join("")}</tr>`);

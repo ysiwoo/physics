@@ -147,9 +147,113 @@ const Physics = {
     },
   },
 
-  // 위치/속도 데이터에서 가속도·힘·에너지를 유도한다 (그래프용).
+  // ---------------- 운동량·충격량 실험 (벽 사이를 오가며 반발) ----------------
+  momentum: {
+    // state: [x(왼쪽 벽 기준 위치), v(+ 오른쪽)]
+    simulate(D, v0, m, k, restitution, dt) {
+      let state = [D / 2, v0];
+      let t = 0;
+      const data = [{ t, x: D / 2, v: v0 }];
+      const deriv = ([, v]) => [v, k > 0 ? -(k / m) * v * Math.abs(v) : 0];
+      const tMax = 40;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < tMax) {
+        state = rk4Step(state, dt, deriv);
+        t += dt;
+        if (state[0] <= 0 && state[1] < 0) {
+          state[0] = 0;
+          state[1] = -state[1] * restitution;
+        } else if (state[0] >= D && state[1] > 0) {
+          state[0] = D;
+          state[1] = -state[1] * restitution;
+        }
+        data.push({ t, x: state[0], v: state[1] });
+        if (Math.abs(state[1]) < 0.03) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
+      }
+      return data;
+    },
+  },
+
+  // ---------------- 등속 원운동 (감쇠 시 각속도 감소) ----------------
+  circular: {
+    period(R, v0) {
+      return (2 * Math.PI * R) / Math.abs(v0);
+    },
+    // k=0(이론)이면 각속도가 일정하게 유지되어 정확히 minPeriods만큼 돌고 끊는다 (반복 재생 이음매용).
+    simulate(R, v0, m, k, minPeriods, dt) {
+      const omega0 = v0 / R;
+      let state = [0, omega0];
+      let t = 0;
+      const data = [{ t, theta: 0, omega: omega0 }];
+      const deriv = ([, omega]) => [omega, k > 0 ? -((k * R) / m) * omega * Math.abs(omega) : 0];
+      const T = this.period(R, v0);
+      const minT = Math.max(minPeriods, 1) * T;
+      const hardCap = 60;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < hardCap) {
+        state = rk4Step(state, dt, deriv);
+        t += dt;
+        data.push({ t, theta: state[0], omega: state[1] });
+        if (k === 0) {
+          if (t >= minT) break;
+          continue;
+        }
+        if (t >= minT && Math.abs(state[1]) < 0.02) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
+      }
+      return data;
+    },
+  },
+
+  // ---------------- 단진동 운동 (용수철 - 감쇠) ----------------
+  shm: {
+    period(springK, m) {
+      return 2 * Math.PI * Math.sqrt(m / springK);
+    },
+    simulate(springK, x0, m, k, minPeriods, dt) {
+      let state = [x0, 0];
+      let t = 0;
+      const data = [{ t, x: x0, v: 0 }];
+      const deriv = ([x, v]) => [v, -(springK / m) * x - (k > 0 ? (k / m) * v * Math.abs(v) : 0)];
+      const T = this.period(springK, m);
+      const minT = Math.max(minPeriods, 1) * T;
+      const hardCap = 60;
+      const restStreakLimit = Math.round(0.6 / dt);
+      let restStreak = 0;
+      while (t < hardCap) {
+        state = rk4Step(state, dt, deriv);
+        t += dt;
+        data.push({ t, x: state[0], v: state[1] });
+        if (k === 0) {
+          if (t >= minT) break;
+          continue;
+        }
+        if (t >= minT && Math.abs(state[0]) < 0.003 && Math.abs(state[1]) < 0.02) {
+          restStreak++;
+          if (restStreak > restStreakLimit) break;
+        } else {
+          restStreak = 0;
+        }
+      }
+      return data;
+    },
+  },
+
+  // 위치/속도 데이터에서 운동량·가속도·힘·에너지를 유도한다 (그래프용).
   // 속도는 중심차분으로 미분해 순간 가속도를 구한다.
-  derive(data, motion, m, g, L) {
+  // extra: 단진자={L}, 등속원운동={R}, 단진동={springK} — 나머지 운동은 사용하지 않는다.
+  derive(data, motion, m, g, extra) {
     const n = data.length;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
@@ -157,28 +261,44 @@ const Physics = {
       const prev = data[Math.max(i - 1, 0)];
       const next = data[Math.min(i + 1, n - 1)];
       const dt = Math.max(next.t - prev.t, 1e-6);
-      let v, a, h;
+      let v, a, h, PE;
       if (motion === "freefall") {
         v = d.v;
         a = (next.v - prev.v) / dt;
         h = d.y;
+        PE = m * g * h;
       } else if (motion === "projectile") {
         v = Math.hypot(d.vx, d.vy);
         const ax = (next.vx - prev.vx) / dt;
         const ay = (next.vy - prev.vy) / dt;
         a = Math.hypot(ax, ay);
         h = d.y;
-      } else {
+        PE = m * g * h;
+      } else if (motion === "pendulum") {
+        const L = extra.L;
         v = L * d.angVel;
         const angAccel = (next.angVel - prev.angVel) / dt;
         const centripetal = L * d.angVel * d.angVel; // 구심가속도 (v²/L)
         const tangential = L * angAccel; // 접선가속도
         a = Math.hypot(tangential, centripetal);
         h = L * (1 - Math.cos(d.theta)); // 최하점 기준 높이
+        PE = m * g * h;
+      } else if (motion === "momentum") {
+        v = d.v;
+        a = (next.v - prev.v) / dt;
+        PE = 0; // 수평 트랙, 높이 변화 없음
+      } else if (motion === "circular") {
+        const R = extra.R;
+        v = R * d.omega;
+        a = R * d.omega * d.omega; // 구심가속도 (등속이면 일정, 감쇠 시 감소)
+        PE = 0; // 수평면 위 원운동, 높이 변화 없음
+      } else if (motion === "shm") {
+        v = d.v;
+        a = (next.v - prev.v) / dt;
+        PE = 0.5 * extra.springK * d.x * d.x; // 탄성 위치 에너지
       }
       const KE = 0.5 * m * v * v;
-      const PE = m * g * h;
-      out[i] = { t: d.t, v, a, F: m * a, KE, PE, ME: KE + PE };
+      out[i] = { t: d.t, v, a, F: m * a, KE, PE, ME: KE + PE, p: m * v };
     }
     return out;
   },
