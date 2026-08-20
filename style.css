@@ -61,6 +61,7 @@ body {
 
 .motion-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -246,7 +247,8 @@ body {
 
 #simCanvas {
   width: 100%;
-  height: 380px;
+  height: auto;
+  aspect-ratio: 560 / 380;
   background: var(--canvas-bg);
   border-radius: 6px;
   display: block;
@@ -342,9 +344,114 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
 
 td.err-cell.high { color: var(--danger); }
 
+/* ---------------- 툴팁 ---------------- */
+[data-tip] { position: relative; }
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: 8px;
+  background: var(--text);
+  color: var(--panel);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  width: max-content;
+  max-width: 230px;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+  z-index: 80;
+  pointer-events: none;
+}
+
+.motion-nav [data-tip]:hover::after,
+.motion-nav [data-tip]:focus-visible::after {
+  bottom: auto;
+  top: 100%;
+  margin-bottom: 0;
+  margin-top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--btn-bg);
+  color: var(--text-dim);
+  font-size: 0.62rem;
+  font-style: normal;
+  cursor: help;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ---------------- 프리셋 ---------------- */
+.preset-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preset-btn {
+  width: 100%;
+  background: var(--btn-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.preset-btn:hover { border-color: var(--accent); }
+
+/* ---------------- 헤더 + 버튼 한 줄 배치 / 내보내기 ---------------- */
+.group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.group-header h2 { margin: 0; }
+
+.export-btn {
+  background: var(--btn-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.export-btn:hover { border-color: var(--accent); }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .controls { grid-row: 1; grid-column: 1; }
   .main-view { grid-column: 1; grid-row: 2; grid-template-columns: 1fr; }
   .table-wrap { grid-column: 1; grid-row: 3; }
+}
+
+@media (max-width: 600px) {
+  .layout { padding: 12px 12px 32px; gap: 12px; }
+  .app-header { padding: 12px; }
+  .app-header h1 { font-size: 1.05rem; }
+  .motion-btn { padding: 7px 11px; font-size: 0.82rem; }
+  .control-group { padding: 12px; }
+  .chart-wrap { height: 320px; }
+  [data-tip]:hover::after, [data-tip]:focus-visible::after { max-width: 180px; }
 }

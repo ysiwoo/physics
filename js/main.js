@@ -37,6 +37,9 @@ const els = {
   graphType: document.getElementById("graphType"),
   tableHead: document.querySelector("#dataTable thead tr"),
   tableBody: document.querySelector("#dataTable tbody"),
+  presetButtons: document.getElementById("presetButtons"),
+  exportChartBtn: document.getElementById("exportChartBtn"),
+  exportCsvBtn: document.getElementById("exportCsvBtn"),
 };
 
 const ctx = els.canvas.getContext("2d");
@@ -82,6 +85,50 @@ const GRAPH_TYPES = {
   peT: { field: "PE", label: "위치 에너지", unit: "J" },
   meT: { field: "ME", label: "역학적 에너지", unit: "J" },
 };
+
+// 운동별 프리셋: els.<id>.value에 그대로 넣을 값들 (문자열/숫자 둘 다 가능)
+const PRESETS = {
+  freefall: [
+    { label: "지구에서 사과 낙하", values: { gravity: 9.8, ff_height: 1.5, ff_restitution: 0.2 } },
+    { label: "달에서 낙하 (g=1.6)", values: { gravity: 1.6, ff_height: 1.5, ff_restitution: 0.2 } },
+    { label: "높은 곳에서 쇠구슬 낙하", values: { gravity: 9.8, ff_height: 20, ff_restitution: 0.7 } },
+  ],
+  projectile: [
+    { label: "야구공 던지기", values: { pj_v0: 20, pj_angle: 35, pj_h0: 1.5 } },
+    { label: "농구 슛", values: { pj_v0: 7, pj_angle: 52, pj_h0: 2 } },
+  ],
+  circular: [
+    { label: "놀이공원 회전 그네", values: { ci_radius: 3, ci_v0: 4 } },
+    { label: "빠르게 도는 인공위성", values: { ci_radius: 1, ci_v0: 8 } },
+  ],
+  pendulum: [
+    { label: "그네 타기", values: { pd_length: 2.5, pd_angle: 25 } },
+    { label: "괘종시계 진자", values: { pd_length: 0.25, pd_angle: 10 } },
+  ],
+  shm: [
+    { label: "부드러운 스프링", values: { sh_springK: 0.1, sh_x0: 3 } },
+    { label: "뻣뻣한 스프링", values: { sh_springK: 5, sh_x0: 2 } },
+  ],
+};
+
+function renderPresets() {
+  const list = PRESETS[state.motion] || [];
+  els.presetButtons.innerHTML = "";
+  list.forEach((preset) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "preset-btn";
+    btn.textContent = preset.label;
+    btn.addEventListener("click", () => {
+      Object.entries(preset.values).forEach(([id, value]) => {
+        if (els[id]) els[id].value = value;
+      });
+      resetPlayback();
+      computeAll();
+    });
+    els.presetButtons.appendChild(btn);
+  });
+}
 
 // 이론(k=0)이 손실 없이 정확히 주기적인 운동들 — theoryAt/derivedAt에서 위상을 감아 반복시킨다.
 const PERIODIC_MOTIONS = ["pendulum", "circular", "shm"];
@@ -158,6 +205,7 @@ function setMotion(motion) {
     p.classList.toggle("hidden", p.dataset.motionPanel !== state.motion);
   });
   els.canvas.classList.toggle("pendulum-mode", motion === "pendulum");
+  renderPresets();
 }
 
 els.motionBtns.forEach((btn) => {
@@ -221,6 +269,42 @@ els.graphType.addEventListener("change", () => {
   state.graphType = els.graphType.value;
   buildChart(getParams());
   drawFrame();
+});
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(text) {
+  const s = String(text);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+els.exportCsvBtn.addEventListener("click", () => {
+  const headers = [...els.tableHead.querySelectorAll("th")].map((th) => th.textContent);
+  const rows = [...els.tableBody.querySelectorAll("tr")].map((tr) =>
+    [...tr.querySelectorAll("td")].map((td) => td.textContent)
+  );
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  downloadBlob(blob, `${state.motion}_측정값.csv`);
+});
+
+els.exportChartBtn.addEventListener("click", () => {
+  if (!state.chart) return;
+  const a = document.createElement("a");
+  a.href = state.chart.toBase64Image();
+  a.download = `${state.motion}_${state.graphType}_그래프.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
 
 function resetPlayback() {
@@ -776,8 +860,15 @@ function updateChartMarker() {
 }
 
 // ---------------- 표 ----------------
-function fmt(n, d = 3) {
-  return Number.isFinite(n) ? n.toFixed(d) : "-";
+// 유효숫자 기준 표시 (물리량은 자릿수에 관계없이 4자리 유효숫자로 통일).
+// 시간 열은 등간격 눈금이라 별도로 fmtTime()에서 고정 소수점으로 표시한다.
+function fmt(n, sig = 4) {
+  if (!Number.isFinite(n)) return "-";
+  if (n === 0) return "0";
+  return Number(n.toPrecision(sig)).toString();
+}
+function fmtTime(n) {
+  return Number.isFinite(n) ? n.toFixed(2) : "-";
 }
 function errRate(real, theory) {
   if (Math.abs(theory) < 1e-9) return null;
@@ -827,17 +918,17 @@ function buildTable(p) {
       const thd = theoryAt(tt);
       if (p.airOn) {
         const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
+        cells = [fmtTime(tt), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
       } else {
-        cells = [fmt(tt, 2), fmt(thd.y), fmt(thd.v)];
+        cells = [fmtTime(tt), fmt(thd.y), fmt(thd.v)];
       }
     } else if (state.motion === "projectile") {
       const thd = theoryAt(tt);
       if (p.airOn) {
         const r = realAt(tt);
-        cells = [fmt(tt, 2), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y)];
+        cells = [fmtTime(tt), fmt(r.x), fmt(thd.x), errCell(r.x, thd.x), fmt(r.y), fmt(thd.y), errCell(r.y, thd.y)];
       } else {
-        cells = [fmt(tt, 2), fmt(thd.x), fmt(thd.y), fmt(thd.speed)];
+        cells = [fmtTime(tt), fmt(thd.x), fmt(thd.y), fmt(thd.speed)];
       }
     } else if (state.motion === "pendulum") {
       const thd = theoryAt(tt);
@@ -845,9 +936,9 @@ function buildTable(p) {
       if (p.airOn) {
         const r = realAt(tt);
         const rDeg = (r.theta * 180) / Math.PI, rAV = (r.angVel * 180) / Math.PI;
-        cells = [fmt(tt, 2), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
+        cells = [fmtTime(tt), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
       } else {
-        cells = [fmt(tt, 2), fmt(thDeg), fmt(thAV)];
+        cells = [fmtTime(tt), fmt(thDeg), fmt(thAV)];
       }
     } else if (state.motion === "circular") {
       const thd = theoryAt(tt);
@@ -855,9 +946,9 @@ function buildTable(p) {
       if (p.airOn) {
         const r = realAt(tt);
         const rDeg = (r.theta * 180) / Math.PI, rAV = (r.omega * 180) / Math.PI;
-        cells = [fmt(tt, 2), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
+        cells = [fmtTime(tt), fmt(rDeg), fmt(thDeg), errCell(rDeg, thDeg), fmt(rAV), fmt(thAV), errCell(rAV, thAV)];
       } else {
-        cells = [fmt(tt, 2), fmt(thDeg), fmt(thAV)];
+        cells = [fmtTime(tt), fmt(thDeg), fmt(thAV)];
       }
     } else if (state.motion === "shm") {
       const thd = theoryAt(tt);
@@ -865,9 +956,9 @@ function buildTable(p) {
       if (p.airOn) {
         const r = realAt(tt);
         const rXcm = r.x * 100;
-        cells = [fmt(tt, 2), fmt(rXcm), fmt(thXcm), errCell(rXcm, thXcm), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
+        cells = [fmtTime(tt), fmt(rXcm), fmt(thXcm), errCell(rXcm, thXcm), fmt(r.v), fmt(thd.v), errCell(r.v, thd.v)];
       } else {
-        cells = [fmt(tt, 2), fmt(thXcm), fmt(thd.v)];
+        cells = [fmtTime(tt), fmt(thXcm), fmt(thd.v)];
       }
     }
     rows.push(`<tr>${cells.map((c) => (typeof c === "string" && c.startsWith("<td")) ? c : `<td>${c}</td>`).join("")}</tr>`);
@@ -877,4 +968,5 @@ function buildTable(p) {
 }
 
 // 초기 실행
+renderPresets();
 applyTheme(savedTheme);

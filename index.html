@@ -11,11 +11,11 @@
 <header class="app-header">
   <h1>쇠구슬 물리 실험 시뮬레이션 <span class="credit">광덕고등학교 수학 지능 동아리</span></h1>
   <nav class="motion-nav">
-    <button class="motion-btn active" data-motion="freefall">자유낙하 운동</button>
-    <button class="motion-btn" data-motion="projectile">포물선 운동</button>
-    <button class="motion-btn" data-motion="circular">등속 원운동</button>
-    <button class="motion-btn" data-motion="pendulum">단진자 운동</button>
-    <button class="motion-btn" data-motion="shm">단진동 운동</button>
+    <button class="motion-btn active" data-motion="freefall" data-tip="물체가 중력만 받아 아래로 떨어지는 운동">자유낙하 운동</button>
+    <button class="motion-btn" data-motion="projectile" data-tip="수평 방향 속도와 중력이 함께 작용해 포물선을 그리는 운동">포물선 운동</button>
+    <button class="motion-btn" data-motion="circular" data-tip="일정한 속력으로 원을 그리며 도는 운동. 속력이 일정해도 방향이 계속 바뀌어 구심가속도가 존재">등속 원운동</button>
+    <button class="motion-btn" data-motion="pendulum" data-tip="줄에 매달린 추가 중력 복원력으로 좌우로 진동하는 운동">단진자 운동</button>
+    <button class="motion-btn" data-motion="shm" data-tip="용수철의 복원력(F=-kx)으로 진동하는 운동. 단진자와 달리 질량이 주기에 영향을 줌">단진동 운동</button>
   </nav>
 </header>
 
@@ -25,10 +25,10 @@
     <section class="control-group">
       <h2>재생</h2>
       <div class="playback-row">
-        <button type="button" id="playBtn">▶ 재생</button>
-        <button type="button" id="resetBtn">⟲ 초기화</button>
+        <button type="button" id="playBtn" data-tip="시뮬레이션을 재생하거나 일시정지합니다">▶ 재생</button>
+        <button type="button" id="resetBtn" data-tip="재생 시간만 0으로 되돌립니다 (입력값은 그대로 유지)">⟲ 초기화</button>
       </div>
-      <label>재생 속도
+      <label data-tip="애니메이션이 재생되는 배속입니다. 물리량 자체는 바뀌지 않습니다">재생 속도
         <select id="speed">
           <option value="0.25">0.25×</option>
           <option value="0.5">0.5×</option>
@@ -38,7 +38,12 @@
         </select>
       </label>
       <div class="readout" id="readout">시간: 0.00 s</div>
-      <button type="button" id="resetAllBtn" class="reset-all-btn">⟲ 모든 설정 초기화</button>
+      <button type="button" id="resetAllBtn" class="reset-all-btn" data-tip="모든 입력값을 기본값으로 되돌리고 자유낙하 탭으로 이동합니다">⟲ 모든 설정 초기화</button>
+    </section>
+
+    <section class="control-group">
+      <h2>프리셋 <span class="tip-icon" data-tip="자주 쓰는 예시 상황을 버튼 하나로 불러옵니다. 현재 선택된 운동 탭에 맞는 예시가 표시됩니다">ⓘ</span></h2>
+      <div class="preset-buttons" id="presetButtons"></div>
     </section>
 
     <section class="control-group">
@@ -51,28 +56,28 @@
 
     <section class="control-group">
       <h2>물체 (쇠구슬)</h2>
-      <label>질량 (g)
+      <label data-tip="쇠구슬의 질량. 클수록 관성이 커져 공기저항의 영향을 덜 받습니다">질량 (g)
         <input type="number" id="mass" value="10" min="1" max="5000" step="1">
       </label>
-      <label>반지름 (cm)
+      <label data-tip="쇠구슬의 반지름. 클수록 공기저항을 받는 단면적이 커집니다">반지름 (cm)
         <input type="number" id="radius" value="5" min="0.1" max="10" step="0.1">
       </label>
-      <button type="button" id="massFromRadius">강철 밀도로 질량 계산</button>
+      <button type="button" id="massFromRadius" data-tip="강철 밀도(7850 kg/m³) 기준으로 위 반지름에 맞는 실제 질량을 계산해 넣습니다">강철 밀도로 질량 계산</button>
 
-      <label>중력가속도 g (m/s²)
+      <label data-tip="중력가속도. 지구 9.8, 달 1.6, 목성 24.8 m/s² 등으로 바꿔서 비교해볼 수 있습니다">중력가속도 g (m/s²)
         <input type="number" id="gravity" value="9.8" min="1" max="25" step="0.1">
       </label>
 
-      <label class="checkbox-row">
+      <label class="checkbox-row" data-tip="켜면 공기저항이 적용된 '실제값'을 계산해서 '이론값'과 함께 비교하고, 표에 오차율까지 보여줍니다">
         <input type="checkbox" id="airResistance">
         실제 상황 (공기저항 적용)
       </label>
 
       <div id="airParams" class="sub-params hidden">
-        <label>공기 밀도 ρ (kg/m³)
+        <label data-tip="공기(유체)의 밀도. 값을 아주 크게 하면 물속에 있는 것처럼 저항이 커집니다">공기 밀도 ρ (kg/m³)
           <input type="number" id="airDensity" value="1.225" min="0" max="5" step="0.001">
         </label>
-        <label>항력 계수 Cd
+        <label data-tip="구의 항력계수. 매끄러운 구는 보통 약 0.47입니다">항력 계수 Cd
           <input type="number" id="dragCoef" value="0.47" min="0" max="2" step="0.01">
         </label>
       </div>
@@ -80,65 +85,65 @@
 
     <section class="control-group" data-motion-panel="freefall">
       <h2>자유낙하 조건</h2>
-      <label>낙하 높이 h (m)
+      <label data-tip="공을 놓는 높이. 바닥까지 이 높이만큼 떨어집니다">낙하 높이 h (m)
         <input type="number" id="ff_height" value="20" min="1" max="200" step="0.5">
       </label>
-      <label>반발 계수 e (바닥 튕김)
+      <label data-tip="바닥에 부딪힌 뒤 튀어 오르는 정도. 1이면 완전탄성(에너지 손실 없음), 0이면 튀지 않고 멈춤">반발 계수 e (바닥 튕김)
         <input type="number" id="ff_restitution" value="0.7" min="0" max="0.98" step="0.01">
       </label>
     </section>
 
     <section class="control-group hidden" data-motion-panel="projectile">
       <h2>포물선 운동 조건</h2>
-      <label>초기 속력 v₀ (m/s)
+      <label data-tip="발사되는 순간의 속력">초기 속력 v₀ (m/s)
         <input type="number" id="pj_v0" value="20" min="0.5" max="100" step="0.5">
       </label>
-      <label>발사각 θ (°)
+      <label data-tip="지면과 이루는 발사 각도. 0°는 수평, 90°는 수직 위쪽">발사각 θ (°)
         <input type="number" id="pj_angle" value="45" min="0" max="90" step="1">
       </label>
-      <label>초기 높이 h₀ (m)
+      <label data-tip="발사가 시작되는 높이 (바닥 기준)">초기 높이 h₀ (m)
         <input type="number" id="pj_h0" value="0" min="0" max="50" step="0.5">
       </label>
-      <label>반발 계수 e (바닥 튕김)
+      <label data-tip="바닥에 부딪힌 뒤 튀어 오르는 정도. 1이면 완전탄성, 0이면 튀지 않고 멈춤">반발 계수 e (바닥 튕김)
         <input type="number" id="pj_restitution" value="0.6" min="0" max="0.98" step="0.01">
       </label>
     </section>
 
     <section class="control-group hidden" data-motion-panel="circular">
       <h2>등속 원운동 조건</h2>
-      <label>회전 반지름 R (m)
+      <label data-tip="공이 그리는 원의 반지름">회전 반지름 R (m)
         <input type="number" id="ci_radius" value="1" min="0.1" max="5" step="0.05">
       </label>
-      <label>속력 v₀ (m/s)
+      <label data-tip="원을 도는 접선 방향 속력. 공기저항이 없으면 이 속력이 영원히 일정하게 유지됩니다">속력 v₀ (m/s)
         <input type="number" id="ci_v0" value="3" min="0.1" max="20" step="0.1">
       </label>
-      <label>최소 회전 횟수 (반복 재생 기준)
+      <label data-tip="이론값(공기저항 없음)이 최소 몇 바퀴 돌고 나서 반복 재생을 시작할지 정합니다">최소 회전 횟수 (반복 재생 기준)
         <input type="number" id="ci_periods" value="4" min="1" max="15" step="1">
       </label>
     </section>
 
     <section class="control-group hidden" data-motion-panel="pendulum">
       <h2>단진자 운동 조건</h2>
-      <label>줄 길이 L (m)
+      <label data-tip="추를 매단 줄의 길이. 길수록 한 번 왕복하는 주기가 길어집니다">줄 길이 L (m)
         <input type="number" id="pd_length" value="1" min="0.1" max="5" step="0.05">
       </label>
-      <label>초기 각도 θ₀ (°) — 캔버스에서 쇠구슬을 드래그해도 바뀝니다
+      <label data-tip="진자가 출발하는 각도 (수직 아래 기준). 캔버스에서 쇠구슬을 마우스로 잡고 옮겨도 바뀝니다">초기 각도 θ₀ (°) — 캔버스에서 쇠구슬을 드래그해도 바뀝니다
         <input type="number" id="pd_angle" value="30" min="-175" max="175" step="1">
       </label>
-      <label>최소 진동 횟수 (반복 재생 기준)
+      <label data-tip="이론값(공기저항 없음)이 최소 몇 번 왕복하고 나서 반복 재생을 시작할지 정합니다">최소 진동 횟수 (반복 재생 기준)
         <input type="number" id="pd_periods" value="4" min="1" max="15" step="1">
       </label>
     </section>
 
     <section class="control-group hidden" data-motion-panel="shm">
       <h2>단진동 운동 조건 (용수철)</h2>
-      <label>스프링 상수 k (N/m)
+      <label data-tip="용수철의 세기(k). F=-kx 로 복원력이 작용하며, 클수록 진동이 빨라집니다">스프링 상수 k (N/m)
         <input type="number" id="sh_springK" value="0.1" min="0.01" max="500" step="0.01">
       </label>
-      <label>초기 변위 x₀ (cm)
+      <label data-tip="평형점에서 처음에 얼마나 당기거나 밀어 놓고 놓는지 (진폭)">초기 변위 x₀ (cm)
         <input type="number" id="sh_x0" value="3" min="0.1" max="150" step="0.1">
       </label>
-      <label>최소 진동 횟수 (반복 재생 기준)
+      <label data-tip="이론값(공기저항 없음)이 최소 몇 번 왕복하고 나서 반복 재생을 시작할지 정합니다">최소 진동 횟수 (반복 재생 기준)
         <input type="number" id="sh_periods" value="4" min="1" max="15" step="1">
       </label>
     </section>
@@ -149,8 +154,8 @@
       <canvas id="simCanvas" width="560" height="380"></canvas>
     </div>
     <div class="chart-wrap">
-      <div class="chart-header">
-        <label>그래프 종류
+      <div class="chart-header group-header">
+        <label data-tip="그래프에 표시할 물리량을 고릅니다. 위치·속도·가속도·힘·운동량·에너지 중에서 선택할 수 있어요">그래프 종류
           <select id="graphType">
             <option value="st">위치 - 시간 (s-t)</option>
             <option value="vt">속도 - 시간 (v-t)</option>
@@ -162,6 +167,7 @@
             <option value="meT">역학적 에너지 - 시간</option>
           </select>
         </label>
+        <button type="button" id="exportChartBtn" class="export-btn" data-tip="지금 보이는 그래프를 PNG 이미지 파일로 저장합니다">🖼 이미지 저장</button>
       </div>
       <div class="chart-canvas-holder">
         <canvas id="chartCanvas"></canvas>
@@ -170,7 +176,10 @@
   </section>
 
   <section class="table-wrap">
-    <h2>측정값 표</h2>
+    <div class="group-header">
+      <h2 data-tip="이론값(공기저항 없음)과, '실제 상황'을 켰을 때의 실제값·오차율을 함께 보여줍니다. 실험 리포트에 그대로 활용하세요">측정값 표</h2>
+      <button type="button" id="exportCsvBtn" class="export-btn" data-tip="지금 보이는 표를 CSV 파일로 내려받습니다 (엑셀에서 열 수 있어요)">⬇ CSV 다운로드</button>
+    </div>
     <div class="table-scroll">
       <table id="dataTable">
         <thead><tr></tr></thead>
