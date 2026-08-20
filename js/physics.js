@@ -146,4 +146,40 @@ const Physics = {
       return data;
     },
   },
+
+  // 위치/속도 데이터에서 가속도·힘·에너지를 유도한다 (그래프용).
+  // 속도는 중심차분으로 미분해 순간 가속도를 구한다.
+  derive(data, motion, m, g, L) {
+    const n = data.length;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const d = data[i];
+      const prev = data[Math.max(i - 1, 0)];
+      const next = data[Math.min(i + 1, n - 1)];
+      const dt = Math.max(next.t - prev.t, 1e-6);
+      let v, a, h;
+      if (motion === "freefall") {
+        v = d.v;
+        a = (next.v - prev.v) / dt;
+        h = d.y;
+      } else if (motion === "projectile") {
+        v = Math.hypot(d.vx, d.vy);
+        const ax = (next.vx - prev.vx) / dt;
+        const ay = (next.vy - prev.vy) / dt;
+        a = Math.hypot(ax, ay);
+        h = d.y;
+      } else {
+        v = L * d.angVel;
+        const angAccel = (next.angVel - prev.angVel) / dt;
+        const centripetal = L * d.angVel * d.angVel; // 구심가속도 (v²/L)
+        const tangential = L * angAccel; // 접선가속도
+        a = Math.hypot(tangential, centripetal);
+        h = L * (1 - Math.cos(d.theta)); // 최하점 기준 높이
+      }
+      const KE = 0.5 * m * v * v;
+      const PE = m * g * h;
+      out[i] = { t: d.t, v, a, F: m * a, KE, PE, ME: KE + PE };
+    }
+    return out;
+  },
 };

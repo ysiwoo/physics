@@ -23,10 +23,12 @@ const els = {
   pd_periods: document.getElementById("pd_periods"),
   playBtn: document.getElementById("playBtn"),
   resetBtn: document.getElementById("resetBtn"),
+  resetAllBtn: document.getElementById("resetAllBtn"),
   speed: document.getElementById("speed"),
   readout: document.getElementById("readout"),
   canvas: document.getElementById("simCanvas"),
   chartCanvas: document.getElementById("chartCanvas"),
+  graphType: document.getElementById("graphType"),
   tableHead: document.querySelector("#dataTable thead tr"),
   tableBody: document.querySelector("#dataTable tbody"),
 };
@@ -65,9 +67,19 @@ const THEMES = {
   },
 };
 
+const GRAPH_TYPES = {
+  vt: { field: "v", label: "속도", unit: "m/s" },
+  at: { field: "a", label: "가속도", unit: "m/s²" },
+  Ft: { field: "F", label: "힘", unit: "N" },
+  keT: { field: "KE", label: "운동 에너지", unit: "J" },
+  peT: { field: "PE", label: "위치 에너지", unit: "J" },
+  meT: { field: "ME", label: "역학적 에너지", unit: "J" },
+};
+
 let state = {
   motion: "freefall",
   theme: "dark",
+  graphType: "st",
   playing: false,
   t: 0,
   tEnd: 1,
@@ -170,6 +182,28 @@ els.resetBtn.addEventListener("click", () => {
   drawFrame();
 });
 
+els.resetAllBtn.addEventListener("click", () => {
+  document.querySelectorAll(".controls input[type=\"number\"]").forEach((el) => { el.value = el.defaultValue; });
+  els.airResistance.checked = els.airResistance.defaultChecked;
+  els.airParams.classList.toggle("hidden", !els.airResistance.checked);
+  els.speed.value = "1";
+  els.graphType.value = "st";
+  state.graphType = "st";
+  const freefallBtn = document.querySelector('.motion-btn[data-motion="freefall"]');
+  els.motionBtns.forEach((b) => b.classList.remove("active"));
+  freefallBtn.classList.add("active");
+  state.motion = "freefall";
+  els.panels.forEach((pnl) => pnl.classList.toggle("hidden", pnl.dataset.motionPanel !== state.motion));
+  resetPlayback();
+  computeAll();
+});
+
+els.graphType.addEventListener("change", () => {
+  state.graphType = els.graphType.value;
+  buildChart(getParams());
+  drawFrame();
+});
+
 function resetPlayback() {
   state.t = 0;
   state.playing = false;
@@ -214,6 +248,16 @@ function theoryAt(t) {
 function realAt(t) {
   if (!state.realData) return null;
   return Physics.sampleAt(state.realData, SIM_DT, t);
+}
+
+function derivedAt(t, useReal) {
+  const arr = useReal ? state.realDerived : state.theoryDerived;
+  if (!arr) return null;
+  if (!useReal && state.motion === "pendulum" && state.theoryDuration > 0) {
+    const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
+    return Physics.sampleAt(arr, SIM_DT, wrapped);
+  }
+  return Physics.sampleAt(arr, SIM_DT, t);
 }
 
 function activeData() {
@@ -414,23 +458,35 @@ function tick(ts) {
 function buildChart(p) {
   let labelX = "시간 (s)", labelY = "";
   const th = theme();
+  const gt = state.graphType;
 
-  if (state.motion === "freefall") {
-    labelY = "높이 (m)";
-  } else if (state.motion === "projectile") {
-    labelX = "수평 거리 (m)"; labelY = "높이 (m)";
-  } else if (state.motion === "pendulum") {
-    labelY = "각도 (°)";
+  let theoryPts, realPts;
+
+  if (gt === "st") {
+    state.theoryDerived = null;
+    state.realDerived = null;
+    const toPoint = (motion, d) => {
+      if (motion === "freefall") return { x: d.t, y: d.y };
+      if (motion === "projectile") return { x: d.x, y: d.y };
+      return { x: d.t, y: (d.theta * 180) / Math.PI };
+    };
+    if (state.motion === "freefall") {
+      labelY = "높이 (m)";
+    } else if (state.motion === "projectile") {
+      labelX = "수평 거리 (m)"; labelY = "높이 (m)";
+    } else if (state.motion === "pendulum") {
+      labelY = "각도 (°)";
+    }
+    theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
+    realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
+  } else {
+    const info = GRAPH_TYPES[gt];
+    labelY = `${info.label} (${info.unit})`;
+    state.theoryDerived = Physics.derive(state.theoryData, state.motion, p.massKg, p.g, p.pd_L);
+    state.realDerived = state.realData ? Physics.derive(state.realData, state.motion, p.massKg, p.g, p.pd_L) : null;
+    theoryPts = state.theoryDerived.map((d) => ({ x: d.t, y: d[info.field] }));
+    realPts = state.realDerived ? state.realDerived.map((d) => ({ x: d.t, y: d[info.field] })) : [];
   }
-
-  const toPoint = (motion, d) => {
-    if (motion === "freefall") return { x: d.t, y: d.y };
-    if (motion === "projectile") return { x: d.x, y: d.y };
-    return { x: d.t, y: (d.theta * 180) / Math.PI };
-  };
-
-  const theoryPts = state.theoryData.map((d) => toPoint(state.motion, d));
-  const realPts = state.realData ? state.realData.map((d) => toPoint(state.motion, d)) : [];
 
   if (state.chart) state.chart.destroy();
   state.chart = new Chart(els.chartCanvas.getContext("2d"), {
@@ -484,15 +540,21 @@ function updateChartMarker() {
   if (!state.chart) return;
   const p = getParams();
   let point = null;
-  if (state.motion === "freefall") {
-    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-    point = { x: state.t, y: src.y };
-  } else if (state.motion === "projectile") {
-    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-    point = { x: src.x, y: src.y };
-  } else if (state.motion === "pendulum") {
-    const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-    point = { x: state.t, y: (src.theta * 180) / Math.PI };
+  if (state.graphType === "st") {
+    if (state.motion === "freefall") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: state.t, y: src.y };
+    } else if (state.motion === "projectile") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: src.x, y: src.y };
+    } else if (state.motion === "pendulum") {
+      const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
+      point = { x: state.t, y: (src.theta * 180) / Math.PI };
+    }
+  } else {
+    const info = GRAPH_TYPES[state.graphType];
+    const src = derivedAt(state.t, p.airOn);
+    if (src) point = { x: state.t, y: src[info.field] };
   }
   const markerIdx = state.chart.data.datasets.length - 1;
   state.chart.data.datasets[markerIdx].data = point ? [point] : [];
