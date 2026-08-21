@@ -21,6 +21,7 @@ const els = {
   pd_length: document.getElementById("pd_length"),
   pd_angle: document.getElementById("pd_angle"),
   pd_periods: document.getElementById("pd_periods"),
+  pd_tensionLoss: document.getElementById("pd_tensionLoss"),
   ci_radius: document.getElementById("ci_radius"),
   ci_v0: document.getElementById("ci_v0"),
   ci_periods: document.getElementById("ci_periods"),
@@ -135,6 +136,14 @@ function renderPresets() {
 // 이론(k=0)이 손실 없이 정확히 주기적인 운동들 — theoryAt/derivedAt에서 위상을 감아 반복시킨다.
 const PERIODIC_MOTIONS = ["pendulum", "circular", "shm"];
 
+// 단진자는 장력 손실이 켜져 있으면 줄이 다시 팽팽해질 때 에너지를 잃어(비탄성 충격)
+// k=0이어도 더 이상 정확히 주기적이지 않으므로, 이 경우엔 위상을 감아 반복시키지 않는다.
+function isPeriodicMotion() {
+  if (!PERIODIC_MOTIONS.includes(state.motion)) return false;
+  if (state.motion === "pendulum" && els.pd_tensionLoss.checked) return false;
+  return true;
+}
+
 let state = {
   motion: "freefall",
   theme: "light",
@@ -188,6 +197,7 @@ function getParams() {
     pd_L: parseFloat(els.pd_length.value),
     pd_angle: parseFloat(els.pd_angle.value),
     pd_periods: parseFloat(els.pd_periods.value),
+    pd_tensionLoss: els.pd_tensionLoss.checked,
     ci_R: parseFloat(els.ci_radius.value),
     ci_v0: parseFloat(els.ci_v0.value),
     ci_periods: parseFloat(els.ci_periods.value),
@@ -238,6 +248,11 @@ els.airResistance.addEventListener("change", () => {
   computeAll();
 });
 
+els.pd_tensionLoss.addEventListener("change", () => {
+  resetPlayback();
+  computeAll();
+});
+
 els.massFromRadius.addEventListener("click", () => {
   const radiusM = parseFloat(els.radius.value) / 100;
   const massKg = steelMassFromRadius(radiusM);
@@ -273,6 +288,7 @@ els.resetAllBtn.addEventListener("click", () => {
   document.querySelectorAll(".controls input[type=\"number\"]").forEach((el) => { el.value = el.defaultValue; });
   els.airResistance.checked = els.airResistance.defaultChecked;
   els.airParams.classList.toggle("hidden", !els.airResistance.checked);
+  els.pd_tensionLoss.checked = els.pd_tensionLoss.defaultChecked;
   els.speed.value = "1";
   els.graphType.value = "st";
   state.graphType = "st";
@@ -341,8 +357,8 @@ function computeAll() {
     state.theoryData = Physics.projectile.simulate(p.pj_v0, p.pj_angle, p.pj_h0, p.g, p.massKg, 0, p.pj_e, SIM_DT);
     state.realData = p.airOn ? Physics.projectile.simulate(p.pj_v0, p.pj_angle, p.pj_h0, p.g, p.massKg, p.k, p.pj_e, SIM_DT) : null;
   } else if (state.motion === "pendulum") {
-    state.theoryData = Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, 0, p.pd_periods, SIM_DT);
-    state.realData = p.airOn ? Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, p.pd_periods, SIM_DT) : null;
+    state.theoryData = Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, 0, p.pd_periods, SIM_DT, p.pd_tensionLoss);
+    state.realData = p.airOn ? Physics.pendulum.simulate(p.pd_L, p.pd_angle, p.g, p.massKg, p.k, p.pd_periods, SIM_DT, p.pd_tensionLoss) : null;
   } else if (state.motion === "circular") {
     state.theoryData = Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, 0, p.ci_periods, SIM_DT);
     state.realData = p.airOn ? Physics.circular.simulate(p.ci_R, p.ci_v0, p.massKg, p.k, p.ci_periods, SIM_DT) : null;
@@ -394,7 +410,7 @@ function motionPeriod(motion, p) {
 // 단진자 이론(k=0)은 손실이 없어 정확히 주기적으로 반복되므로,
 // tEnd가 이론 길이보다 길어져도(감쇠가 느린 실제값에 맞춰) 위상을 이어서 보여준다.
 function theoryAt(t) {
-  if (PERIODIC_MOTIONS.includes(state.motion) && state.theoryDuration > 0) {
+  if (isPeriodicMotion() && state.theoryDuration > 0) {
     const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
     return Physics.sampleAt(state.theoryData, SIM_DT, wrapped);
   }
@@ -409,7 +425,7 @@ function realAt(t) {
 function derivedAt(t, useReal) {
   const arr = useReal ? state.realDerived : state.theoryDerived;
   if (!arr) return null;
-  if (!useReal && PERIODIC_MOTIONS.includes(state.motion) && state.theoryDuration > 0) {
+  if (!useReal && isPeriodicMotion() && state.theoryDuration > 0) {
     const wrapped = ((t % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
     return Physics.sampleAt(arr, SIM_DT, wrapped);
   }
@@ -476,7 +492,7 @@ function drawMotionVectors(mapFn, ballX, ballY) {
   if (!derived) return;
 
   const wrap = (tt) => {
-    if (useReal || !PERIODIC_MOTIONS.includes(state.motion) || state.theoryDuration <= 0) return Math.max(tt, 0);
+    if (useReal || !isPeriodicMotion() || state.theoryDuration <= 0) return Math.max(tt, 0);
     return ((tt % state.theoryDuration) + state.theoryDuration) % state.theoryDuration;
   };
   const tNext = wrap(state.t + SIM_DT);
@@ -622,17 +638,20 @@ function drawFrame() {
 
   } else if (state.motion === "pendulum") {
     const { pivotX, pivotY, scale } = pendulumGeometry(p);
-    const ballPos = (theta) => ({
+    // 드래그 중처럼 실제 표본이 없을 때만 쓰는, 항상 반경 L(팽팽한 줄) 기준 위치.
+    const tautPosFromTheta = (theta) => ({
       x: pivotX + Math.sin(theta) * p.pd_L * scale,
       y: pivotY + Math.cos(theta) * p.pd_L * scale,
     });
+    // 시뮬레이션 표본의 실제 x,y(장력 손실로 줄이 느슨해진 구간은 반경이 L보다 짧다).
+    const posFromSample = (d) => ({ x: pivotX + d.x * scale, y: pivotY + d.y * scale });
 
     ctx.fillStyle = th.ground;
     ctx.beginPath(); ctx.arc(pivotX, pivotY, 4, 0, Math.PI * 2); ctx.fill();
 
     if (state.dragThetaDeg !== null) {
       const dragTheta = (state.dragThetaDeg * Math.PI) / 180;
-      const b = ballPos(dragTheta);
+      const b = tautPosFromTheta(dragTheta);
       ctx.strokeStyle = th.ground;
       ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(b.x, b.y); ctx.stroke();
       drawSteelBall(b.x, b.y, ballR, false);
@@ -641,13 +660,16 @@ function drawFrame() {
     }
 
     const thd = theoryAt(state.t);
-    const mapFn = (d) => ballPos(d.theta);
+    const mapFn = posFromSample;
     drawTrail(collectTrail(mapFn));
 
-    const drawArm = (theta, ghost) => {
-      const b = ballPos(theta);
+    // 줄이 느슨해진 구간(d.taut === false)은 점선으로, 팽팽할 땐 실선으로 그려 장력
+    // 손실을 시각적으로 보여준다.
+    const drawArm = (d, ghost) => {
+      const b = posFromSample(d);
+      const slack = d.taut === false;
       ctx.strokeStyle = ghost ? th.ghostStroke : th.ground;
-      ctx.setLineDash(ghost ? [3, 3] : []);
+      ctx.setLineDash(ghost || slack ? [3, 3] : []);
       ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(b.x, b.y); ctx.stroke();
       ctx.setLineDash([]);
       drawSteelBall(b.x, b.y, ballR, ghost);
@@ -655,20 +677,24 @@ function drawFrame() {
 
     let curAngDeg = (thd.theta * 180) / Math.PI;
     let curAngVel = (thd.angVel * 180) / Math.PI;
-    let finalTheta = thd.theta;
+    let curTaut = thd.taut !== false;
+    let finalSample = thd;
     if (p.airOn) {
-      drawArm(thd.theta, true);
+      drawArm(thd, true);
       const r = realAt(state.t);
-      drawArm(r.theta, false);
+      drawArm(r, false);
       curAngDeg = (r.theta * 180) / Math.PI;
       curAngVel = (r.angVel * 180) / Math.PI;
-      finalTheta = r.theta;
+      curTaut = r.taut !== false;
+      finalSample = r;
     } else {
-      drawArm(thd.theta, false);
+      drawArm(thd, false);
     }
-    const finalBallPos = ballPos(finalTheta);
+    const finalBallPos = posFromSample(finalSample);
     drawMotionVectors(mapFn, finalBallPos.x, finalBallPos.y);
-    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${curAngVel.toFixed(1)} °/s`;
+    const angVelText = Number.isFinite(curAngVel) ? `${curAngVel.toFixed(1)} °/s` : "-";
+    const tensionText = curTaut ? "" : "   (장력 없음: 자유낙하 중)";
+    els.readout.textContent = `시간: ${state.t.toFixed(2)} s   각도: ${curAngDeg.toFixed(1)}°   각속도: ${angVelText}${tensionText}`;
 
   } else if (state.motion === "circular") {
     const cx = W / 2, cy = H / 2;
@@ -815,8 +841,8 @@ function startDrag(evt) {
   const p = getParams();
   const { pivotX, pivotY, scale } = pendulumGeometry(p);
   const src = p.airOn ? realAt(state.t) : theoryAt(state.t);
-  const ballX = pivotX + Math.sin(src.theta) * p.pd_L * scale;
-  const ballY = pivotY + Math.cos(src.theta) * p.pd_L * scale;
+  const ballX = pivotX + src.x * scale;
+  const ballY = pivotY + src.y * scale;
   const pt = canvasPoint(evt);
   if (Math.hypot(pt.x - ballX, pt.y - ballY) > 26) return;
   dragState.active = true;

@@ -106,37 +106,101 @@ const Physics = {
     },
   },
 
-  // ---------------- 단진자 운동 (감쇠) ----------------
+  // ---------------- 단진자 운동 (감쇠 + 선택적 장력 손실) ----------------
   pendulum: {
     period(L, g) {
       return 2 * Math.PI * Math.sqrt(L / g);
     },
     // k=0(이론)이면 minPeriods 만큼 정확히 돌고 멈춘다 (반복 재생 시 이음매가 자연스럽도록).
     // k>0(실제, 공기저항)이면 감쇠로 멈추거나, minPeriods를 다 채우거나, 최대 한계까지 돈다.
-    simulate(L, theta0Deg, g, m, k, minPeriods, dt) {
+    //
+    // tensionLoss=true면 줄(장력은 당길 수만 있고 밀 수 없음) 모델을 켠다: 매 스텝 장력
+    // T = m*L*omega² + m*g*cosθ 을 확인해서 T<=0이면(각도가 90°를 넘어 중력의 반경 방향
+    // 성분이 필요한 구심력보다 더 안쪽으로 당길 때) 줄이 느슨해진 것으로 보고, 그 순간부터는
+    // 반경 구속 없이 중력(+공기저항)만 받는 자유낙하(포물선)로 x,y를 직접 적분한다.
+    // 다시 줄 길이(반경 L)에 도달하면 줄이 팽팽해지며(비탄성 충격) 반경 방향 속도 성분은
+    // 사라지고 접선 방향 속도만 남긴 채 진자 운동으로 복귀한다.
+    simulate(L, theta0Deg, g, m, k, minPeriods, dt, tensionLoss) {
       const theta0 = (theta0Deg * Math.PI) / 180;
-      let state = [theta0, 0];
+      const toXY = (th) => ({ x: L * Math.sin(th), y: L * Math.cos(th) }); // pivot 기준, y는 아래쪽 +
+      const toVel = (th, om) => ({ vx: L * Math.cos(th) * om, vy: -L * Math.sin(th) * om });
+      const tensionAt = (th, om) => m * om * om * L + m * g * Math.cos(th);
+
+      const pushSample = (theta, omega, taut) => {
+        const pos = toXY(theta), vel = toVel(theta, omega);
+        data.push({ t, theta, angVel: omega, x: pos.x, y: pos.y, vx: vel.vx, vy: vel.vy, taut });
+      };
+
       let t = 0;
-      const data = [{ t, theta: theta0, angVel: 0 }];
-      const deriv = ([theta, omega]) => {
+      let mode = tensionLoss && tensionAt(theta0, 0) <= 0 ? "slack" : "taut";
+      let tautState = [theta0, 0];
+      let slackState = null;
+      const data = [];
+      if (mode === "slack") {
+        const pos = toXY(theta0), vel = toVel(theta0, 0);
+        slackState = [pos.x, pos.y, vel.vx, vel.vy];
+        data.push({ t, theta: theta0, angVel: 0, x: pos.x, y: pos.y, vx: vel.vx, vy: vel.vy, taut: false });
+      } else {
+        pushSample(theta0, 0, true);
+      }
+
+      const tautDeriv = ([theta, omega]) => {
         const gravTerm = -(g / L) * Math.sin(theta);
         const dragTerm = k > 0 ? -((k * L) / m) * omega * Math.abs(omega) : 0;
         return [omega, gravTerm + dragTerm];
       };
+      const slackDeriv = ([, , vx, vy]) => {
+        const speed = Math.hypot(vx, vy);
+        const drag = k > 0 ? (k / m) * speed : 0;
+        return [vx, vy, -drag * vx, g - drag * vy];
+      };
+
       const T = this.period(L, g);
       const minT = Math.max(minPeriods, 1) * T;
       const hardCap = 60;
       const restStreakLimit = Math.round(0.6 / dt);
       let restStreak = 0;
+      // 장력 손실이 켜져 있으면 줄이 다시 팽팽해질 때 반경 방향 속도를 잃어(비탄성 충격)
+      // k=0이어도 더 이상 정확히 주기적이지 않으므로, 감쇠(k>0)와 같은 정지감지/최대시간
+      // 방식으로 멈춘다.
+      const cleanPeriodicCut = k === 0 && !tensionLoss;
+
       while (t < hardCap) {
-        state = rk4Step(state, dt, deriv);
-        t += dt;
-        data.push({ t, theta: state[0], angVel: state[1] });
-        if (k === 0) {
+        if (mode === "taut") {
+          tautState = rk4Step(tautState, dt, tautDeriv);
+          t += dt;
+          const [theta, omega] = tautState;
+          if (tensionLoss && tensionAt(theta, omega) <= 0) {
+            mode = "slack";
+            const pos = toXY(theta), vel = toVel(theta, omega);
+            slackState = [pos.x, pos.y, vel.vx, vel.vy];
+            data.push({ t, theta, angVel: omega, x: pos.x, y: pos.y, vx: vel.vx, vy: vel.vy, taut: false });
+          } else {
+            pushSample(theta, omega, true);
+          }
+        } else {
+          slackState = rk4Step(slackState, dt, slackDeriv);
+          t += dt;
+          const [x, y, vx, vy] = slackState;
+          const r = Math.hypot(x, y);
+          if (r >= L) {
+            const theta = Math.atan2(x, y);
+            const tanX = Math.cos(theta), tanY = -Math.sin(theta); // 접선 방향 단위벡터
+            const omega = (vx * tanX + vy * tanY) / L; // 반경 방향 속도 성분은 버림
+            mode = "taut";
+            tautState = [theta, omega];
+            pushSample(theta, omega, true);
+          } else {
+            const theta = Math.atan2(x, y); // 표시용(반경이 L보다 짧으므로 근사)
+            data.push({ t, theta, angVel: NaN, x, y, vx, vy, taut: false });
+          }
+        }
+
+        if (cleanPeriodicCut) {
           if (t >= minT) break; // 무손실: 정확히 요청한 주기 수에서 끊어 매끄럽게 반복
           continue;
         }
-        if (t >= minT && Math.abs(state[0]) < 0.01 && Math.abs(state[1]) < 0.02) {
+        if (mode === "taut" && t >= minT && Math.abs(tautState[0]) < 0.01 && Math.abs(tautState[1]) < 0.02) {
           restStreak++;
           if (restStreak > restStreakLimit) break;
         } else {
@@ -242,13 +306,14 @@ const Physics = {
         h = d.y;
         PE = m * g * h;
       } else if (motion === "pendulum") {
-        const L = extra.L;
-        v = L * d.angVel;
-        const angAccel = (next.angVel - prev.angVel) / dt;
-        const centripetal = L * d.angVel * d.angVel; // 구심가속도 (v²/L)
-        const tangential = L * angAccel; // 접선가속도
-        a = Math.hypot(tangential, centripetal);
-        h = L * (1 - Math.cos(d.theta)); // 최하점 기준 높이
+        // x,y,vx,vy는 pivot 기준 실제 위치/속도(장력 손실로 반경이 L보다 작아지는
+        // 구간에서도 유효하다). 가속도는 속도의 중심차분으로 구해 자유낙하 구간과
+        // 줄이 다시 팽팽해지는 순간의 충격까지 그대로 반영한다.
+        v = Math.hypot(d.vx, d.vy);
+        const ax = (next.vx - prev.vx) / dt;
+        const ay = (next.vy - prev.vy) / dt;
+        a = Math.hypot(ax, ay);
+        h = extra.L - d.y; // pivot에서 L만큼 아래(최하점) 기준 높이
         PE = m * g * h;
       } else if (motion === "circular") {
         const R = extra.R;
