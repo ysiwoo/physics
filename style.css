@@ -398,15 +398,21 @@ td.err-cell.high { color: var(--danger); }
 }
 
 .motion-nav [data-tip]:hover::after,
-.motion-nav [data-tip]:focus-visible::after,
-.app-header [data-tip]:hover::after,
-.app-header [data-tip]:focus-visible::after {
+.motion-nav [data-tip]:focus-visible::after {
   bottom: auto;
   top: 100%;
   margin-bottom: 0;
   margin-top: 8px;
   left: 50%;
   transform: translateX(-50%);
+}
+
+.app-header [data-tip]:hover::after,
+.app-header [data-tip]:focus-visible::after {
+  bottom: auto;
+  top: 100%;
+  margin-bottom: 0;
+  margin-top: 8px;
 }
 
 .tip-icon {
